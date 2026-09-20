@@ -1,9 +1,86 @@
-# Environment files — never commit these
-.env
-.env.local
-.env.*.local
-*.env
+# =====================================================================
+# ConnectSphere Event Services (Flask backend + Vue frontend)
+# =====================================================================
 
-# OS
+# ----- Python (backend/) -----
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/build/
+backend/dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Flask
+backend/instance/
+.webassets-cache
+*.db
+*.sqlite
+*.sqlite3
+
+# Flask-Migrate / Alembic scripts ARE version-controlled — do not ignore
+# backend/migrations/
+
+# Testing / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+nosetests.xml
+.tox/
+.cache
+
+# ----- Node / Vue (frontend/) -----
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+*.local
+
+# ----- Environment / secrets (both apps) -----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# ----- Logs -----
+*.log
+logs/
+
+# ----- VSCode -----
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.code-workspace
+
+# ----- OS-specific -----
 .DS_Store
 Thumbs.db
+desktop.ini
+
+# ----- Editors / misc -----
+*.swp
+*.swo
+*~
+*.bak
+
+# ----- Uploaded / generated dev artifacts -----
+uploads/
+tmp/

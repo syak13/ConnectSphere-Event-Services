@@ -1,0 +1,65 @@
+"""
+Event Request Creation / Draft Event Requests
+-----------------------------------------------
+- Create event request with core details, date/time/attendance, venue
+  requirements, equipment/technical requirements, registration requirements
+- Save an in-progress event request as a draft
+- View / edit / submit / delete a saved draft
+"""
+from app.extensions import db
+from app.models.event import Event, EventEquipmentRequirement
+
+CORE_FIELDS = ["name", "purpose", "description", "category"]
+SCHEDULE_FIELDS = ["proposed_date", "proposed_time", "expected_attendance"]
+VENUE_FIELDS = ["capacity_needed", "required_layout", "accessibility_needs", "required_facilities"]
+REGISTRATION_FIELDS = ["registration_required", "intended_capacity"]
+
+EDITABLE_FIELDS = CORE_FIELDS + SCHEDULE_FIELDS + VENUE_FIELDS + REGISTRATION_FIELDS
+
+
+def _apply_fields(event: Event, data: dict):
+    for field in EDITABLE_FIELDS:
+        if field in data:
+            setattr(event, field, data[field])
+
+    if "equipment_requirements" in data:
+        event.equipment_requirements = []
+        for item in data["equipment_requirements"]:
+            event.equipment_requirements.append(
+                EventEquipmentRequirement(
+                    equipment_type=item.get("type"),
+                    quantity=item.get("quantity", 0),
+                    technical_notes=item.get("technicalNotes"),
+                )
+            )
+
+
+def create_draft(organiser_id: int, data: dict) -> Event:
+    event = Event(organiser_id=organiser_id, status="draft")
+    _apply_fields(event, data)
+    db.session.add(event)
+    db.session.commit()
+    return event
+
+
+def update_draft(event: Event, data: dict) -> Event:
+    if event.status != "draft":
+        raise ValueError("Only a draft request can be edited this way")
+    _apply_fields(event, data)
+    db.session.commit()
+    return event
+
+
+def delete_draft(event: Event):
+    if event.status != "draft":
+        raise ValueError("Only a draft request can be deleted")
+    db.session.delete(event)
+    db.session.commit()
+
+
+def list_drafts(organiser_id: int):
+    return (
+        Event.query.filter_by(organiser_id=organiser_id, status="draft")
+        .order_by(Event.updated_at.desc())
+        .all()
+    )
