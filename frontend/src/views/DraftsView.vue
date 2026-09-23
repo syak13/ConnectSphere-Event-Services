@@ -18,10 +18,12 @@
 
 <script setup>
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import eventsApi from "../api/events";
 
 const drafts = ref([]);
 const error = ref("");
+const router = useRouter();
 
 async function load() {
   error.value = "";
@@ -32,6 +34,10 @@ async function load() {
   } catch (e) {
     error.value = e.response?.data?.error || "Could not load saved drafts.";
   }
+}
+
+function editDraft(id) {
+  router.push({ name: "edit-draft", params: { id } });
 }
 
 async function submitDraft(id) {
