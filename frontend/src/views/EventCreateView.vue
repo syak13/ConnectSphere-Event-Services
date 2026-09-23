@@ -72,10 +72,17 @@ const form = reactive({
   registration_required: false,
 });
 
+function sanitizePayload(data) {
+  const cleaned = { ...data };
+  if (cleaned.proposed_date === "") cleaned.proposed_date = null;
+  if (cleaned.proposed_time === "") cleaned.proposed_time = null;
+  return cleaned;
+}
+
 async function saveDraft() {
   error.value = "";
   try {
-    await eventsApi.saveDraft(form);
+    await eventsApi.saveDraft(sanitizePayload(form));
     router.push({ name: "drafts" });
   } catch (e) {
     error.value = e.response?.data?.error || "Could not save draft";
@@ -85,7 +92,7 @@ async function saveDraft() {
 async function submit() {
   error.value = "";
   try {
-    await eventsApi.createEvent({ ...form, submit: true });
+    await eventsApi.saveDraft(sanitizePayload(form));
     router.push({ name: "dashboard" });
   } catch (e) {
     error.value = e.response?.data?.error || "Could not submit request";
