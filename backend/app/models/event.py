@@ -60,6 +60,14 @@ class Event(db.Model):
         "EventCoordinatorHistory", backref="event", cascade="all, delete-orphan"
     )
 
+    @property
+    def status_is_valid(self) -> bool:
+        return self.status in STATUS_LABELS
+
+    @property
+    def status_label(self) -> str:
+        return STATUS_LABELS.get(self.status, UNKNOWN_STATUS_LABEL)
+
     def to_dict(self):
         return {
             "id": self.id,
@@ -70,6 +78,8 @@ class Event(db.Model):
             "organiserId": self.organiser_id,
             "coordinatorId": self.coordinator_id,
             "status": self.status,
+            "statusLabel": self.status_label,
+            "statusValid": self.status_is_valid,
             "proposedDate": self.proposed_date.isoformat() if self.proposed_date else None,
             "proposedTime": self.proposed_time.isoformat() if self.proposed_time else None,
             "expectedAttendance": self.expected_attendance,
