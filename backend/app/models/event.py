@@ -2,6 +2,12 @@ from datetime import datetime
 
 from app.extensions import db
 
+EVENT_STATUSES = (
+    "draft", "submitted", "under_review", "approved",
+    "planning", "confirmed", "completed", "cancelled", "rejected",
+)
+STATUS_LABELS = {s: s.replace("_", " ").capitalize() for s in EVENT_STATUSES}
+UNKNOWN_STATUS_LABEL = "Unknown status"
 
 class Event(db.Model):
     __tablename__ = "events"
