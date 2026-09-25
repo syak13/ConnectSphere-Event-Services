@@ -1,6 +1,6 @@
 <template>
   <div>
-    <h2>New Event Request</h2>
+    <h2>{{ isEditMode ? "Edit Draft Event Request" : "New Event Request" }}</h2>
     <form @submit.prevent="submit">
       <label>
         Name
@@ -45,7 +45,9 @@
 
       <p v-if="error" class="error">{{ error }}</p>
       <div class="actions">
-        <button type="button" @click="saveDraft">Save as Draft</button>
+        <button type="button" @click="saveDraft">
+          {{ isEditMode ? "Save Changes" : "Save as Draft" }}
+        </button>
         <button type="submit">Submit Now</button>
       </div>
     </form>
@@ -53,12 +55,16 @@
 </template>
 
 <script setup>
-import { reactive, ref } from "vue";
-import { useRouter } from "vue-router";
+import { onMounted, reactive, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import eventsApi from "../api/events";
 
+const route = useRoute();
 const router = useRouter();
 const error = ref("");
+
+const draftId = route.params.id;
+const isEditMode = Boolean(draftId);
 const form = reactive({
   name: "",
   purpose: "",
@@ -72,25 +78,75 @@ const form = reactive({
   registration_required: false,
 });
 
+async function loadDraft() {
+  error.value = "";
+
+  try {
+    const { data } = await eventsApi.getEvent(draftId);
+
+    if (data.status !== "draft") {
+      error.value = "Only draft event requests can be edited.";
+      return;
+    }
+
+    Object.assign(form, {
+      name: data.name || "",
+      purpose: data.purpose || "",
+      description: data.description || "",
+      proposed_date: data.proposedDate || "",
+      proposed_time: data.proposedTime || "",
+      expected_attendance: data.expectedAttendance ?? null,
+      capacity_needed: data.venueRequirements?.capacityNeeded ?? null,
+      required_layout: data.venueRequirements?.requiredLayout || "",
+      accessibility_needs:
+        data.venueRequirements?.accessibilityNeeds || "",
+      registration_required: data.registrationRequired ?? false,
+    });
+  } catch (e) {
+    error.value = e.response?.data?.error || "Could not load this draft.";
+  }
+}
+
+function sanitizePayload(data) {
+  const cleaned = { ...data };
+  if (cleaned.proposed_date === "") cleaned.proposed_date = null;
+  if (cleaned.proposed_time === "") cleaned.proposed_time = null;
+  return cleaned;
+}
+
 async function saveDraft() {
   error.value = "";
+
   try {
-    await eventsApi.saveDraft(form);
+    const payload = sanitizePayload(form);
+
+    if (isEditMode) {
+      await eventsApi.updateDraft(draftId, payload);
+    } else {
+      await eventsApi.saveDraft(payload);
+    }
+
     router.push({ name: "drafts" });
   } catch (e) {
-    error.value = e.response?.data?.error || "Could not save draft";
+    error.value = e.response?.data?.error || "Could not save draft.";
   }
 }
 
 async function submit() {
   error.value = "";
   try {
-    await eventsApi.createEvent({ ...form, submit: true });
+    await eventsApi.createEvent({...sanitizePayload(form), submit: true, });
     router.push({ name: "dashboard" });
   } catch (e) {
     error.value = e.response?.data?.error || "Could not submit request";
   }
 }
+
+onMounted(() => {
+  if (isEditMode) {
+    loadDraft();
+  }
+});
 </script>
 
 <style scoped>

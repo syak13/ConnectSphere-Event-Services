@@ -8,6 +8,7 @@ import EventCreateView from "../views/EventCreateView.vue";
 import ReviewQueueView from "../views/ReviewQueueView.vue";
 import EventDetailView from "../views/EventDetailView.vue";
 
+
 const routes = [
   { path: "/login", name: "login", component: LoginView },
   {
