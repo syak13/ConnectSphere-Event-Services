@@ -156,3 +156,121 @@ def test_submitted_event_cannot_be_updated_as_draft(app, organiser, coordinator)
                 event,
                 {"name": "Changed Event Name"}
             )
+
+def test_submission_blocked_when_name_missing(app, organiser):
+    with app.app_context():
+        payload = dict(VALID_PAYLOAD)
+        payload.pop("name")
+        event = drafts.create_draft(organiser, payload)
+        with pytest.raises(ValueError, match="name"):
+            review.submit_event(event, organiser)
+
+
+def test_submission_blocked_when_required_layout_missing(app, organiser):
+    with app.app_context():
+        payload = dict(VALID_PAYLOAD)
+        payload.pop("required_layout")
+        event = drafts.create_draft(organiser, payload)
+        with pytest.raises(ValueError, match="required_layout"):
+            review.submit_event(event, organiser)
+
+
+def test_submission_blocked_when_accessibility_needs_missing(app, organiser):
+    with app.app_context():
+        payload = dict(VALID_PAYLOAD)
+        payload.pop("accessibility_needs")
+        event = drafts.create_draft(organiser, payload)
+        with pytest.raises(ValueError, match="accessibility_needs"):
+            review.submit_event(event, organiser)
+
+
+def test_submission_succeeds_without_category(app, organiser, coordinator):
+    """category is the one genuinely optional core-details field."""
+    with app.app_context():
+        payload = dict(VALID_PAYLOAD)
+        payload.pop("category", None)
+        event = drafts.create_draft(organiser, payload)
+        event = review.submit_event(event, organiser)
+        assert event.status == "under_review"
+
+
+def test_submission_succeeds_with_empty_equipment_list(app, organiser, coordinator):
+    with app.app_context():
+        payload = dict(VALID_PAYLOAD)
+        payload["equipment_requirements"] = []
+        event = drafts.create_draft(organiser, payload)
+        event = review.submit_event(event, organiser)
+        assert event.status == "under_review"
+        assert event.equipment_requirements == []
+
+
+def test_draft_can_be_saved_completely_empty(app, organiser):
+    """Drafts shouldn't be validated the same way submissions are --
+    an Organiser should be able to save a blank draft and fill it in later."""
+    with app.app_context():
+        event = drafts.create_draft(organiser, {})
+        assert event.status == "draft"
+        assert event.id is not None
+
+
+def test_draft_completed_incrementally_then_submitted(app, organiser, coordinator):
+    """Full realistic lifecycle: start a draft with almost nothing, fill
+    it in over a couple of edits, then submit successfully."""
+    with app.app_context():
+        event = drafts.create_draft(organiser, {"name": "Draft Event"})
+        assert event.status == "draft"
+
+        event = drafts.update_draft(event, {
+            "purpose": "Testing incremental completion",
+            "description": "Filled in over multiple edits.",
+            "proposed_date": FUTURE_DATE.isoformat(),
+            "proposed_time": "14:00",
+            "expected_attendance": 40,
+            "capacity_needed": 50,
+            "required_layout": "boardroom",
+            "accessibility_needs": "None",
+        })
+
+        event = review.submit_event(event, organiser)
+        assert event.status == "under_review"
+
+
+def test_cannot_submit_already_submitted_event(app, organiser, coordinator):
+    """Negative case: submitting twice should be rejected, not silently
+    reassign a new coordinator or duplicate anything."""
+    from app.events.services.status import InvalidTransitionError
+
+    with app.app_context():
+        event = drafts.create_draft(organiser, dict(VALID_PAYLOAD))
+        review.submit_event(event, organiser)
+
+        with pytest.raises(InvalidTransitionError):
+            review.submit_event(event, organiser)
+
+
+def test_organiser_cannot_submit_someone_elses_event(app, organiser):
+    """Security-relevant negative case: submit_event checks organiser_id
+    ownership -- make sure a different Organiser can't submit on someone
+    else's behalf."""
+    from app.extensions import db
+    from app.models.user import Organisation, Role, User
+    from werkzeug.security import generate_password_hash
+
+    with app.app_context():
+        other_org = Organisation(name="Other Org")
+        db.session.add(other_org)
+        db.session.commit()
+        other_user = User(
+            name="Other Organiser",
+            email="other_organiser@test.com",
+            password_hash=generate_password_hash("password"),
+            organisation_id=other_org.id,
+        )
+        other_user.roles = [Role.query.filter_by(name="event_organiser").first()]
+        db.session.add(other_user)
+        db.session.commit()
+
+        event = drafts.create_draft(organiser, dict(VALID_PAYLOAD))
+
+        with pytest.raises(PermissionError):
+            review.submit_event(event, other_user.id)
