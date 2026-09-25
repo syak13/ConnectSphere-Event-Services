@@ -14,17 +14,18 @@ def _current_user():
     return User.query.get(int(get_jwt_identity()))
 
 
+INTERNAL_ROLES = ("event_coordinator", "venue_staff", "technical_support_staff")
+
+
+INTERNAL_ROLES = ("event_coordinator", "venue_staff", "technical_support_staff")
+
+
 def _can_view(event: Event, user: User) -> bool:
     if user.has_role("event_organiser") and event.organiser_id == user.id:
         return True
-    if user.has_role("event_coordinator"):
-        # Coordinators have oversight visibility across all events for planning
-        # purposes (Q&A #30/#34); previous coordinators keep read-only access
-        # via coordinator history (Q&A #39).
-        return True
-    if user.has_role("venue_staff") or user.has_role("technical_support_staff"):
-        return True
-    return False
+    if event.status == "draft":
+        return False  # drafts are private to their organiser until submitted
+    return any(user.has_role(r) for r in INTERNAL_ROLES)
 
 
 # ---------------------------------------------------------------------
@@ -139,7 +140,11 @@ def list_all_events():
     user = _current_user()
     if not any(user.has_role(r) for r in ("event_coordinator", "venue_staff", "technical_support_staff")):
         return jsonify({"error": "Forbidden"}), 403
-    events = Event.query.order_by(Event.proposed_date.asc()).all()
+    events = (
+        Event.query.filter(Event.status != "draft")
+        .order_by(Event.proposed_date.asc())
+        .all()
+    )
     return jsonify([e.to_dict() for e in events]), 200
 
 
