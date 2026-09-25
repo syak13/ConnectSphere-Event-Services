@@ -10,6 +10,20 @@ from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models.user import Organisation, Role, User  # noqa: E402
 
+from sqlalchemy import BigInteger
+from sqlalchemy.ext.compiler import compiles
+
+
+@compiles(BigInteger, "sqlite")
+def _compile_big_integer_as_integer_for_sqlite(type_, compiler, **kw):
+    """
+    SQLite only auto-generates a primary key when its type compiles to
+    exactly INTEGER. Our schema uses BIGINT UNSIGNED everywhere (matching
+    MySQL), which breaks autoincrement under SQLite-backed tests. This
+    only affects the SQLite test dialect -- the real MySQL schema is untouched.
+    """
+    return "INTEGER"
+
 
 @pytest.fixture()
 def app():

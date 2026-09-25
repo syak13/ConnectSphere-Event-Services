@@ -11,47 +11,36 @@ import EventDetailView from "../views/EventDetailView.vue";
 
 const routes = [
   { path: "/login", name: "login", component: LoginView },
-
   {
+    // No roles list: any logged-in user can open the dashboard
     path: "/",
     name: "dashboard",
     component: DashboardView,
     meta: { requiresAuth: true },
   },
-
   {
     path: "/drafts",
     name: "drafts",
     component: DraftsView,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, roles: ["event_organiser"] },
   },
-
   {
     path: "/events/new",
     name: "event-create",
     component: EventCreateView,
-    meta: { requiresAuth: true },
-  },
-
-  {
-    path: "/events/drafts/:id/edit",
-    name: "edit-draft",
-    component: EventCreateView,
     meta: { requiresAuth: true, roles: ["event_organiser"] },
   },
-
   {
     path: "/review",
     name: "review-queue",
     component: ReviewQueueView,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, roles: ["event_coordinator"] },
   },
-
   {
     path: "/events/:id",
     name: "event-detail",
     component: EventDetailView,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, roles: ["event_organiser", "event_coordinator"] },
   },
 ];
 
@@ -63,11 +52,13 @@ const router = createRouter({
 router.beforeEach((to) => {
   const auth = useAuthStore();
 
+  // Not logged in -> login page
   if (to.meta.requiresAuth && !auth.isAuthenticated) {
     return { name: "login" };
   }
 
-  if (to.meta.roles && !to.meta.roles.some((role) => auth.hasRole(role))) {
+  // If the route lists roles, the user needs at least one of them
+  if (to.meta.roles && !to.meta.roles.some((r) => auth.hasRole(r))) {
     return { name: "dashboard" };
   }
 });

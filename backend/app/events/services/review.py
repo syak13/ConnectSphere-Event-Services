@@ -16,8 +16,7 @@ from app.events.services.assignment import assign_coordinator
 from app.events.services.status import InvalidTransitionError, change_status
 from app.models.event import Event, EventReview
 
-REQUIRED_FOR_SUBMISSION = ["name", "purpose", "description", "proposed_date", "expected_attendance"]
-
+from app.events.services.validators import validate_for_submission
 
 def submit_event(event: Event, organiser_id: int) -> Event:
     if event.organiser_id != organiser_id:
@@ -25,9 +24,9 @@ def submit_event(event: Event, organiser_id: int) -> Event:
     if event.status != "draft":
         raise InvalidTransitionError("Only a draft request can be submitted")
 
-    missing = [f for f in REQUIRED_FOR_SUBMISSION if getattr(event, f) in (None, "")]
-    if missing:
-        raise ValueError(f"Cannot submit: missing required field(s): {', '.join(missing)}")
+    errors = validate_for_submission(event)
+    if errors:
+        raise ValueError("Cannot submit: " + "; ".join(errors))
 
     event.submitted_at = datetime.utcnow()
     change_status(event, "submitted", changed_by_id=organiser_id)

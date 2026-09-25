@@ -23,8 +23,11 @@ const auth = useAuthStore();
 const router = useRouter();
 
 async function handleLogout() {
-  await auth.logout();
-  router.push({ name: "login" });
+  try {
+    await auth.logout();
+  } finally {
+    router.replace({ name: "login" });
+  }
 }
 </script>
 
