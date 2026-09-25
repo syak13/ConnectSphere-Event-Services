@@ -8,6 +8,7 @@ Event Request Creation / Draft Event Requests
 """
 from app.extensions import db
 from app.models.event import Event, EventEquipmentRequirement
+from datetime import date, time, datetime
 
 CORE_FIELDS = ["name", "purpose", "description", "category"]
 SCHEDULE_FIELDS = ["proposed_date", "proposed_time", "expected_attendance"]
@@ -16,11 +17,33 @@ REGISTRATION_FIELDS = ["registration_required", "intended_capacity"]
 
 EDITABLE_FIELDS = CORE_FIELDS + SCHEDULE_FIELDS + VENUE_FIELDS + REGISTRATION_FIELDS
 
+def _parse_date(value):
+    if value is None:
+        return None
+
+    if isinstance(value, date):
+        return value
+
+    return datetime.strptime(value, "%Y-%m-%d").date()
+
+def _parse_time(value):
+    if value is None:
+        return None
+
+    if isinstance(value, time):
+        return value
+
+    return datetime.strptime(value, "%H:%M").time()
 
 def _apply_fields(event: Event, data: dict):
     for field in EDITABLE_FIELDS:
         if field in data:
-            setattr(event, field, data[field])
+            value = data[field]
+            if field == "proposed_date":
+                value = _parse_date(value)
+            elif field == "proposed_time":
+                value = _parse_time(value)
+            setattr(event, field, value)
 
     if "equipment_requirements" in data:
         event.equipment_requirements = []
