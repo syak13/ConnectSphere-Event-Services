@@ -130,6 +130,8 @@ def assigned_events():
     query = Event.query.filter_by(coordinator_id=user.id).order_by(Event.updated_at.desc())
     return jsonify([e.to_dict() for e in query.all()]), 200
 
+
+@events_bp.get("")
 @jwt_required()
 def list_all_events():
     """Single combined calendar view: Coordinators, Venue Staff and Technical
