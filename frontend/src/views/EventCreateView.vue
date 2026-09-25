@@ -150,33 +150,139 @@ onMounted(() => {
 </script>
 
 <style scoped>
-form {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-  max-width: 480px;
+.page-title {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text, #2d2a4a);
 }
+
+.card {
+  max-width: 720px;
+  padding: 1.5rem;
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e4defa);
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgba(109, 91, 208, 0.08);
+}
+
+/* Two columns on wide screens; .full fields span both */
+form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.full {
+  grid-column: 1 / -1;
+}
+
 label {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
+  gap: 0.35rem;
   font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text, #2d2a4a);
 }
+
 label.checkbox {
   flex-direction: row;
   align-items: center;
   gap: 0.5rem;
 }
-input, textarea {
-  padding: 0.5rem;
-  border: 1px solid #ccc;
-  border-radius: 4px;
+
+input,
+textarea {
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border, #e4defa);
+  border-radius: 10px;
+  background: #fcfbff;
+  color: var(--text, #2d2a4a);
+  font: inherit;
+  font-weight: 400;
 }
+
+input::placeholder,
+textarea::placeholder {
+  color: #a5a2c2;
+}
+
+input:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--primary, #6d5bd0);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px var(--primary-tint, #ebe7ff);
+}
+
+input[type="checkbox"] {
+  width: 1.1rem;
+  height: 1.1rem;
+  padding: 0;
+  accent-color: var(--primary, #6d5bd0);
+}
+
+textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+/* Buttons */
 .actions {
   display: flex;
-  gap: 0.5rem;
+  gap: 0.6rem;
+  margin-top: 0.25rem;
 }
+
+.btn-draft,
+.btn-submit {
+  padding: 0.55rem 1.3rem;
+  border: none;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.btn-draft {
+  background: var(--lilac-bg, #e9e5fb);
+  color: var(--lilac-text, #4b3fa0);
+}
+
+.btn-draft:hover {
+  background: #ddd6fb;
+}
+
+.btn-submit {
+  background: var(--primary, #6d5bd0);
+  color: #ffffff;
+}
+
+.btn-submit:hover {
+  background: var(--primary-hover, #5b49bd);
+}
+
+.btn-draft:focus-visible,
+.btn-submit:focus-visible {
+  outline: 2px solid var(--primary, #6d5bd0);
+  outline-offset: 2px;
+}
+
+/* Error message */
 .error {
-  color: #b00020;
+  margin: 0;
+  padding: 0.6rem 0.9rem;
+  border-radius: 10px;
+  background: var(--rose-bg, #ffdce3);
+  color: var(--rose-text, #a12b47);
+  font-size: 0.9rem;
+}
+
+/* One column on phones */
+@media (max-width: 560px) {
+  form {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

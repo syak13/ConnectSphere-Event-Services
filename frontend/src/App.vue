@@ -1,13 +1,15 @@
 <template>
   <div id="layout">
     <nav v-if="auth.isAuthenticated">
-      <router-link to="/">Dashboard</router-link>
-      <router-link v-if="auth.hasRole('event_organiser')" to="/events/new">New Request</router-link>
-      <router-link v-if="auth.hasRole('event_organiser')" to="/drafts">My Drafts</router-link>
-      <router-link v-if="auth.hasRole('event_coordinator')" to="/review">Review Queue</router-link>
-      <span class="spacer" />
-      <span>{{ auth.user?.name }}</span>
-      <button @click="handleLogout">Logout</button>
+      <div class="nav-inner">
+        <router-link to="/">Dashboard</router-link>
+        <router-link v-if="auth.hasRole('event_organiser')" to="/events/new">New Request</router-link>
+        <router-link v-if="auth.hasRole('event_organiser')" to="/drafts">My Drafts</router-link>
+        <router-link v-if="auth.hasRole('event_coordinator')" to="/review">Review Queue</router-link>
+        <span class="spacer" />
+        <span class="user-name">{{ auth.user?.name }}</span>
+        <button class="logout" @click="handleLogout">Logout</button>
+      </div>
     </nav>
     <main>
       <router-view />
@@ -32,41 +34,133 @@ async function handleLogout() {
 </script>
 
 <style>
+/* Theme colours: change them here and the whole app follows */
+:root {
+  /* Main colours */
+  --primary: #6d5bd0;
+  --primary-hover: #5b49bd;
+  --primary-tint: #ebe7ff;
+  --bg: #f6f4ff;
+  --surface: #ffffff;
+  --border: #e4defa;
+  --text: #2d2a4a;
+  --text-muted: #6b6890;
+
+  /* Pastel pairs: soft background + darker text so it stays readable */
+  --lilac-bg: #e9e5fb;
+  --lilac-text: #4b3fa0;
+  --mint-bg: #d3f5e3;
+  --mint-text: #1e6b47;
+  --butter-bg: #fff1c2;
+  --butter-text: #8a5a00;
+  --rose-bg: #ffdce3;
+  --rose-text: #a12b47;
+  --sky-bg: #d6ecff;
+  --sky-text: #1f5f99;
+}
+
 body {
   margin: 0;
-  background: #f7f7fa;
+  color: var(--text);
+  background-color: var(--bg);
+  /* soft lavender wash at the top of every page */
+  background-image: linear-gradient(180deg, #ece7ff 0%, var(--bg) 300px);
+  background-repeat: no-repeat;
 }
+
 #layout {
   font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  min-height: 100vh;
+}
+
+/* Top bar spans the full width, content inside stays centred */
+nav {
+  background: rgba(255, 255, 255, 0.8);
+  border-bottom: 1px solid var(--border);
+}
+
+.nav-inner {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  align-items: center;
   max-width: 960px;
   margin: 0 auto;
-  padding: 1rem;
+  padding: 0.6rem 1rem;
 }
-nav {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-  margin-bottom: 1.5rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid #ddd;
-}
+
 nav a {
+  padding: 0.4rem 0.85rem;
+  border-radius: 999px;
   text-decoration: none;
-  color: #2b2d42;
-  font-weight: 600;
+  color: var(--text-muted);
+  font-weight: 500;
 }
+
+nav a:hover {
+  background: var(--lilac-bg);
+  color: var(--lilac-text);
+}
+
+/* Current page */
+nav a.router-link-exact-active {
+  background: var(--primary-tint);
+  color: var(--primary);
+}
+
+nav a:focus-visible,
+.logout:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
 .spacer {
   flex: 1;
 }
+
+.user-name {
+  margin-right: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+
+.logout {
+  padding: 0.4rem 0.95rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.logout:hover {
+  background: var(--rose-bg);
+  border-color: var(--rose-bg);
+  color: var(--rose-text);
+}
+
+/* Page content area */
+main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem;
+}
+
+/* Base table look for any view that doesn't style its own */
 table {
   width: 100%;
   border-collapse: collapse;
 }
-th, td {
+
+th,
+td {
   text-align: left;
   padding: 0.5rem;
-  border-bottom: 1px solid #eee;
+  border-bottom: 1px solid var(--border);
 }
+
 button {
   cursor: pointer;
 }

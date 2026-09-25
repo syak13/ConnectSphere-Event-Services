@@ -75,17 +75,50 @@ onMounted(load);
 </script>
 
 <style scoped>
+.page-title {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text, #2d2a4a);
+}
+
+.card {
+  background: var(--surface, #ffffff);
+  border: 1px solid var(--border, #e4defa);
+  border-radius: 14px;
+  box-shadow: 0 4px 16px rgba(109, 91, 208, 0.08);
+  overflow: hidden;
+}
+
 .draft-list {
   list-style: none;
+  margin: 0;
   padding: 0;
 }
+
 .draft-list li {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 0;
-  border-bottom: 1px solid #eee;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--border, #e4defa);
 }
+
+.draft-list li:last-child {
+  border-bottom: none;
+}
+
+.draft-list li:hover {
+  background: #faf9ff;
+}
+
+.draft-name {
+  font-weight: 500;
+  color: var(--text, #2d2a4a);
+}
+
 .draft-actions {
   display: flex;
   gap: 0.5rem;
