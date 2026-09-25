@@ -1,46 +1,74 @@
 <template>
   <div>
-    <h2 class="page-title">My Drafts</h2>
-
-    <div v-if="drafts.length" class="card">
-      <ul class="draft-list">
-        <li v-for="d in drafts" :key="d.id">
-          <span class="draft-name">{{ d.name || "(untitled)" }}</span>
-          <span class="draft-actions">
-            <button class="btn-submit" @click="submitDraft(d.id)">Submit</button>
-            <button class="btn-delete" @click="deleteDraft(d.id)">Delete</button>
-          </span>
-        </li>
-      </ul>
-    </div>
-
-    <div v-else class="card empty">
-      <p>No drafts saved.</p>
-      <router-link to="/events/new" class="btn">Start a new request</router-link>
-    </div>
+    <h2>My Drafts</h2>
+    <p v-if="error" class="error">{{ error }}</p>
+    <ul v-if="drafts.length" class="draft-list">
+      <li v-for="d in drafts" :key="d.id">
+        <span>{{ d.name || "(untitled)" }}</span>
+        <span class="draft-actions">
+          <button @click="editDraft(d.id)">Edit</button>
+          <button @click="submitDraft(d.id)">Submit</button>
+          <button @click="deleteDraft(d.id)">Delete</button>
+        </span>
+      </li>
+    </ul>
+    <p v-else>No drafts saved.</p>
   </div>
 </template>
 
 <script setup>
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import eventsApi from "../api/events";
 
 const drafts = ref([]);
+const error = ref("");
+const router = useRouter();
 
 async function load() {
-  const { data } = await eventsApi.listDrafts();
-  drafts.value = data;
+  error.value = "";
+
+  try {
+    const { data } = await eventsApi.listDrafts();
+    drafts.value = data;
+  } catch (e) {
+    error.value = e.response?.data?.error || "Could not load saved drafts.";
+  }
+}
+
+function editDraft(id) {
+  router.push({ name: "edit-draft", params: { id } });
 }
 
 async function submitDraft(id) {
-  await eventsApi.submitEvent(id);
-  await load();
+  error.value = "";
+  try {
+    await eventsApi.submitEvent(id);
+    await load();
+  } catch (e) {
+    error.value =
+      e.response?.data?.error ||
+      "Could not submit this draft. Please check the required fields.";
+  }
 }
 
 async function deleteDraft(id) {
-  if (!window.confirm("Delete this draft? This can't be undone.")) return;
-  await eventsApi.deleteDraft(id);
-  await load();
+  error.value = "";
+
+  const confirmed = window.confirm(
+    "Delete this draft? This action cannot be undone."
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  try {
+    await eventsApi.deleteDraft(id);
+    await load();
+  } catch (e) {
+    error.value = e.response?.data?.error || "Could not delete this draft.";
+  }
 }
 
 onMounted(load);
@@ -95,60 +123,8 @@ onMounted(load);
   display: flex;
   gap: 0.5rem;
 }
-
-/* Buttons */
-.btn-submit,
-.btn-delete,
-.btn {
-  padding: 0.4rem 1rem;
-  border: none;
-  border-radius: 999px;
-  font: inherit;
-  font-size: 0.9rem;
-  font-weight: 500;
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.btn-submit,
-.btn {
-  background: var(--primary, #6d5bd0);
-  color: #ffffff;
-}
-
-.btn-submit:hover,
-.btn:hover {
-  background: var(--primary-hover, #5b49bd);
-}
-
-.btn-delete {
-  background: var(--rose-bg, #ffdce3);
-  color: var(--rose-text, #a12b47);
-}
-
-.btn-delete:hover {
-  background: #ffc9d4;
-}
-
-.btn-submit:focus-visible,
-.btn-delete:focus-visible,
-.btn:focus-visible {
-  outline: 2px solid var(--primary, #6d5bd0);
-  outline-offset: 2px;
-}
-
-/* Empty state */
-.empty {
-  padding: 2rem 1rem;
-  text-align: center;
-  color: var(--text-muted, #6b6890);
-}
-
-.empty p {
-  margin: 0 0 1rem;
-}
-
-.empty .btn {
-  display: inline-block;
+.error {
+  color: #b00020;
+  margin: 0.5rem 0;
 }
 </style>

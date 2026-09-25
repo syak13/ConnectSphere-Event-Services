@@ -1,67 +1,70 @@
 <template>
   <div>
-    <h2 class="page-title">New Event Request</h2>
+    <h2>{{ isEditMode ? "Edit Draft Event Request" : "New Event Request" }}</h2>
+    <form @submit.prevent="submit">
+      <label>
+        Name
+        <input v-model="form.name" required />
+      </label>
+      <label>
+        Purpose
+        <input v-model="form.purpose" required />
+      </label>
+      <label>
+        Description
+        <textarea v-model="form.description" required></textarea>
+      </label>
+      <label>
+        Proposed Date
+        <input v-model="form.proposed_date" type="date" />
+      </label>
+      <label>
+        Proposed Time
+        <input v-model="form.proposed_time" type="time" />
+      </label>
+      <label>
+        Expected Attendance
+        <input v-model.number="form.expected_attendance" type="number" min="1" />
+      </label>
+      <label>
+        Capacity Needed
+        <input v-model.number="form.capacity_needed" type="number" min="1" />
+      </label>
+      <label>
+        Required Layout
+        <input v-model="form.required_layout" placeholder="e.g. theatre, banquet" />
+      </label>
+      <label>
+        Accessibility Needs
+        <textarea v-model="form.accessibility_needs"></textarea>
+      </label>
+      <label class="checkbox">
+        <input v-model="form.registration_required" type="checkbox" />
+        Registration required
+      </label>
 
-    <div class="card">
-      <form @submit.prevent="submit">
-        <label class="full">
-          Name
-          <input v-model="form.name" required />
-        </label>
-        <label class="full">
-          Purpose
-          <input v-model="form.purpose" required />
-        </label>
-        <label class="full">
-          Description
-          <textarea v-model="form.description" required></textarea>
-        </label>
-        <label>
-          Proposed Date
-          <input v-model="form.proposed_date" type="date" />
-        </label>
-        <label>
-          Proposed Time
-          <input v-model="form.proposed_time" type="time" />
-        </label>
-        <label>
-          Expected Attendance
-          <input v-model.number="form.expected_attendance" type="number" min="1" />
-        </label>
-        <label>
-          Capacity Needed
-          <input v-model.number="form.capacity_needed" type="number" min="1" />
-        </label>
-        <label class="full">
-          Required Layout
-          <input v-model="form.required_layout" placeholder="e.g. theatre, banquet" />
-        </label>
-        <label class="full">
-          Accessibility Needs
-          <textarea v-model="form.accessibility_needs"></textarea>
-        </label>
-        <label class="checkbox full">
-          <input v-model="form.registration_required" type="checkbox" />
-          Registration required
-        </label>
-
-        <p v-if="error" class="error full">{{ error }}</p>
-        <div class="actions full">
-          <button type="button" class="btn-draft" @click="saveDraft">Save as Draft</button>
-          <button type="submit" class="btn-submit">Submit Now</button>
-        </div>
-      </form>
-    </div>
+      <p v-if="error" class="error">{{ error }}</p>
+      <div class="actions">
+        <button type="button" @click="saveDraft">
+          {{ isEditMode ? "Save Changes" : "Save as Draft" }}
+        </button>
+        <button type="submit">Submit Now</button>
+      </div>
+    </form>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref } from "vue";
-import { useRouter } from "vue-router";
+import { onMounted, reactive, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import eventsApi from "../api/events";
 
+const route = useRoute();
 const router = useRouter();
 const error = ref("");
+
+const draftId = route.params.id;
+const isEditMode = Boolean(draftId);
 const form = reactive({
   name: "",
   purpose: "",
@@ -75,25 +78,75 @@ const form = reactive({
   registration_required: false,
 });
 
+async function loadDraft() {
+  error.value = "";
+
+  try {
+    const { data } = await eventsApi.getEvent(draftId);
+
+    if (data.status !== "draft") {
+      error.value = "Only draft event requests can be edited.";
+      return;
+    }
+
+    Object.assign(form, {
+      name: data.name || "",
+      purpose: data.purpose || "",
+      description: data.description || "",
+      proposed_date: data.proposedDate || "",
+      proposed_time: data.proposedTime || "",
+      expected_attendance: data.expectedAttendance ?? null,
+      capacity_needed: data.venueRequirements?.capacityNeeded ?? null,
+      required_layout: data.venueRequirements?.requiredLayout || "",
+      accessibility_needs:
+        data.venueRequirements?.accessibilityNeeds || "",
+      registration_required: data.registrationRequired ?? false,
+    });
+  } catch (e) {
+    error.value = e.response?.data?.error || "Could not load this draft.";
+  }
+}
+
+function sanitizePayload(data) {
+  const cleaned = { ...data };
+  if (cleaned.proposed_date === "") cleaned.proposed_date = null;
+  if (cleaned.proposed_time === "") cleaned.proposed_time = null;
+  return cleaned;
+}
+
 async function saveDraft() {
   error.value = "";
+
   try {
-    await eventsApi.saveDraft(form);
+    const payload = sanitizePayload(form);
+
+    if (isEditMode) {
+      await eventsApi.updateDraft(draftId, payload);
+    } else {
+      await eventsApi.saveDraft(payload);
+    }
+
     router.push({ name: "drafts" });
   } catch (e) {
-    error.value = e.response?.data?.error || "Could not save draft";
+    error.value = e.response?.data?.error || "Could not save draft.";
   }
 }
 
 async function submit() {
   error.value = "";
   try {
-    await eventsApi.createEvent({ ...form, submit: true });
+    await eventsApi.createEvent({...sanitizePayload(form), submit: true, });
     router.push({ name: "dashboard" });
   } catch (e) {
     error.value = e.response?.data?.error || "Could not submit request";
   }
 }
+
+onMounted(() => {
+  if (isEditMode) {
+    loadDraft();
+  }
+});
 </script>
 
 <style scoped>
