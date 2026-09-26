@@ -355,3 +355,159 @@ class TestAC6FallbackOverHTTP:
         }
         assert rows[good]["statusValid"] is True
         assert rows[bad]["statusValid"] is False
+
+"""
+Tests for Story 2: Organiser views status of all their requests.
+
+    As an Event Organiser, I want to see the current status of each of my
+    event requests in one list, so that I know where each one stands.
+
+/api/events/mine returns a plain JSON array (same shape whether or not
+pagination params are used) so existing callers -- Story 1's tests and
+DashboardView.vue -- keep working unchanged. Pagination metadata rides in
+response headers: X-Total-Count, X-Page, X-Per-Page, X-Total-Pages.
+"""
+from datetime import date, timedelta
+
+import pytest
+
+ORG = "organiser@test.com"
+
+
+def _mine(client, headers, **params):
+    return client.get("/api/events/mine", headers=headers, query_string=params)
+
+
+class TestAC1StatusShownForEachRequest:
+    def test_each_request_shows_its_current_status(self, client, auth_header, organiser, make_event):
+        make_event(organiser, status="draft", name="A")
+        make_event(organiser, status="under_review", name="B")
+        make_event(organiser, status="confirmed", name="C")
+
+        res = _mine(client, auth_header(ORG))
+        assert res.status_code == 200
+
+        rows = {r["name"]: r["status"] for r in res.get_json()}
+        assert rows == {"A": "draft", "B": "under_review", "C": "confirmed"}
+
+    def test_status_label_is_present_on_each_row(self, client, auth_header, organiser, make_event):
+        make_event(organiser, status="under_review")
+        row = _mine(client, auth_header(ORG)).get_json()[0]
+        assert row["statusLabel"] == "Under review"
+
+
+class TestAC2EmptyStateNotError:
+    def test_zero_requests_returns_empty_list_not_error(self, client, auth_header, organiser):
+        res = _mine(client, auth_header(ORG))
+        assert res.status_code == 200
+        assert res.get_json() == []
+        assert res.headers["X-Total-Count"] == "0"
+
+
+class TestAC3OnlyOwnRequestsVisible:
+    def test_sees_only_own_requests(self, client, auth_header, organiser, make_user, make_event):
+        other_id = make_user("other@test.com", ["event_organiser"])
+        make_event(organiser, status="confirmed", name="Mine")
+        make_event(other_id, status="confirmed", name="Not mine")
+
+        names = [r["name"] for r in _mine(client, auth_header(ORG)).get_json()]
+        assert names == ["Mine"]
+
+    def test_other_organisers_requests_never_leak_across_pages(
+        self, client, auth_header, organiser, make_user, make_event
+    ):
+        other_id = make_user("other@test.com", ["event_organiser"])
+        for i in range(5):
+            make_event(organiser, name=f"Mine {i}")
+        for i in range(5):
+            make_event(other_id, name=f"Theirs {i}")
+
+        res = _mine(client, auth_header(ORG), page=1, per_page=100)
+        body = res.get_json()
+        assert res.headers["X-Total-Count"] == "5"
+        assert all(r["name"].startswith("Mine") for r in body)
+
+
+class TestAC4RemainsUsableWithManyRequests:
+    @staticmethod
+    def _seed_many(make_event, organiser, count):
+        base = date(2026, 1, 1)
+        for i in range(count):
+            make_event(
+                organiser,
+                name=f"Event {i}",
+                proposed_date=base + timedelta(days=i),
+                updated_at=base + timedelta(days=i),  # distinct, increasing recency
+            )
+
+    def test_large_number_of_requests_is_paginated(self, client, auth_header, organiser, make_event):
+        self._seed_many(make_event, organiser, 55)
+
+        res = _mine(client, auth_header(ORG), page=1, per_page=20)
+        body = res.get_json()
+
+        assert res.headers["X-Total-Count"] == "55"
+        assert len(body) == 20
+        assert res.headers["X-Page"] == "1"
+        assert res.headers["X-Per-Page"] == "20"
+        assert res.headers["X-Total-Pages"] == "3"  # ceil(55 / 20)
+
+    def test_second_page_returns_the_next_slice(self, client, auth_header, organiser, make_event):
+        self._seed_many(make_event, organiser, 55)
+
+        page1 = _mine(client, auth_header(ORG), page=1, per_page=20).get_json()
+        page2 = _mine(client, auth_header(ORG), page=2, per_page=20).get_json()
+        page3 = _mine(client, auth_header(ORG), page=3, per_page=20).get_json()
+
+        assert len(page1) == 20
+        assert len(page2) == 20
+        assert len(page3) == 15  # remainder
+
+        ids_seen = set()
+        for page in (page1, page2, page3):
+            page_ids = {row["id"] for row in page}
+            assert not (ids_seen & page_ids), "pages overlapped"
+            ids_seen |= page_ids
+        assert len(ids_seen) == 55
+
+    def test_results_are_sorted_most_recent_first(self, client, auth_header, organiser, make_event):
+        older = make_event(organiser, name="Older", updated_at=date(2026, 1, 1))
+        newer = make_event(organiser, name="Newer", updated_at=date(2026, 1, 2))
+
+        ids_in_order = [row["id"] for row in _mine(client, auth_header(ORG)).get_json()]
+        assert ids_in_order.index(newer) < ids_in_order.index(older)
+
+    def test_out_of_range_page_returns_empty_not_an_error(
+        self, client, auth_header, organiser, make_event
+    ):
+        self._seed_many(make_event, organiser, 5)
+
+        res = _mine(client, auth_header(ORG), page=99, per_page=20)
+        assert res.status_code == 200
+        assert res.get_json() == []
+
+    def test_per_page_is_capped_to_a_sane_maximum(self, client, auth_header, organiser, make_event):
+        self._seed_many(make_event, organiser, 10)
+
+        res = _mine(client, auth_header(ORG), page=1, per_page=100000)
+        assert int(res.headers["X-Per-Page"]) <= 100
+
+    @pytest.mark.parametrize("bad_page", [0, -1])
+    def test_non_positive_page_falls_back_to_page_one(
+        self, client, auth_header, organiser, make_event, bad_page
+    ):
+        self._seed_many(make_event, organiser, 5)
+        res = _mine(client, auth_header(ORG), page=bad_page, per_page=20)
+        assert res.status_code == 200
+        assert len(res.get_json()) == 5
+        assert res.headers["X-Page"] == "1"
+
+    def test_missing_page_and_per_page_returns_full_unpaginated_list(
+        self, client, auth_header, organiser, make_event
+    ):
+        """No query params at all -> default behaviour, unchanged
+        response shape, same as before pagination existed."""
+        make_event(organiser)
+        res = _mine(client, auth_header(ORG))
+        assert res.status_code == 200
+        assert isinstance(res.get_json(), list)
