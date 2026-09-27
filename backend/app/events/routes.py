@@ -14,17 +14,18 @@ def _current_user():
     return User.query.get(int(get_jwt_identity()))
 
 
+INTERNAL_ROLES = ("event_coordinator", "venue_staff", "technical_support_staff")
+
+
+INTERNAL_ROLES = ("event_coordinator", "venue_staff", "technical_support_staff")
+
+
 def _can_view(event: Event, user: User) -> bool:
     if user.has_role("event_organiser") and event.organiser_id == user.id:
         return True
-    if user.has_role("event_coordinator"):
-        # Coordinators have oversight visibility across all events for planning
-        # purposes (Q&A #30/#34); previous coordinators keep read-only access
-        # via coordinator history (Q&A #39).
-        return True
-    if user.has_role("venue_staff") or user.has_role("technical_support_staff"):
-        return True
-    return False
+    if event.status == "draft":
+        return False  # drafts are private to their organiser until submitted
+    return any(user.has_role(r) for r in INTERNAL_ROLES)
 
 
 # ---------------------------------------------------------------------
@@ -115,10 +116,33 @@ def submit_event_route(event_id):
 @events_bp.get("/mine")
 @roles_required("event_organiser")
 def my_events():
-    """Organiser views status of all their requests."""
+    """Organiser views the status of all their own requests, most recent
+    first. Defaults to the full list as a plain array (unchanged from
+    before, so existing callers keep working); pass ?page=&per_page= to
+    page through large result sets (Story 2, AC4). Pagination metadata
+    goes in response headers so the response body is always an array."""
     user = _current_user()
     query = Event.query.filter_by(organiser_id=user.id).order_by(Event.updated_at.desc())
-    return jsonify([e.to_dict() for e in query.all()]), 200
+
+    page = request.args.get("page", type=int)
+    per_page = request.args.get("per_page", type=int)
+
+    if page is None and per_page is None:
+        events = query.all()
+        response = jsonify([e.to_dict() for e in events])
+        response.headers["X-Total-Count"] = str(len(events))
+        return response, 200
+
+    page = max(page or 1, 1)
+    per_page = min(max(per_page or 20, 1), 100)
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    response = jsonify([e.to_dict() for e in pagination.items])
+    response.headers["X-Total-Count"] = str(pagination.total)
+    response.headers["X-Page"] = str(pagination.page)
+    response.headers["X-Per-Page"] = str(per_page)
+    response.headers["X-Total-Pages"] = str(pagination.pages)
+    return response, 200
 
 
 @events_bp.get("/assigned")
@@ -139,7 +163,11 @@ def list_all_events():
     user = _current_user()
     if not any(user.has_role(r) for r in ("event_coordinator", "venue_staff", "technical_support_staff")):
         return jsonify({"error": "Forbidden"}), 403
-    events = Event.query.order_by(Event.proposed_date.asc()).all()
+    events = (
+        Event.query.filter(Event.status != "draft")
+        .order_by(Event.proposed_date.asc())
+        .all()
+    )
     return jsonify([e.to_dict() for e in events]), 200
 
 

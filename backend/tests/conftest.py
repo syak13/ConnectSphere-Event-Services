@@ -9,6 +9,8 @@ from werkzeug.security import generate_password_hash  # noqa: E402
 from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models.user import Organisation, Role, User  # noqa: E402
+from datetime import date  # noqa: E402
+from app.models.event import Event  # noqa: E402
 
 from sqlalchemy import BigInteger
 from sqlalchemy.ext.compiler import compiles
@@ -72,3 +74,43 @@ def coordinator(app):
         db.session.add(user)
         db.session.commit()
         return user.id
+
+@pytest.fixture()
+def make_user(app):
+    def _make(email, role_names, name=None):
+        user = User(
+            name=name or email.split("@")[0],
+            email=email,
+            password_hash=generate_password_hash("password"),
+        )
+        user.roles = [Role.query.filter_by(name=r).first() for r in role_names]
+        db.session.add(user)
+        db.session.commit()
+        return user.id
+    return _make
+
+
+@pytest.fixture()
+def auth_header(client):
+    def _login(email, password="password"):
+        res = client.post("/api/auth/login", json={"email": email, "password": password})
+        assert res.status_code == 200, res.get_json()
+        return {"Authorization": f"Bearer {res.get_json()['accessToken']}"}
+    return _login
+
+
+@pytest.fixture()
+def make_event(app):
+    """Inserts an event directly at a given status, bypassing the state
+    machine on purpose so we can test display/visibility in isolation."""
+    def _make(organiser_id, status="draft", **fields):
+        defaults = dict(
+            name="Test Event", purpose="Testing", description="A test event",
+            proposed_date=date(2026, 12, 1), expected_attendance=50,
+        )
+        defaults.update(fields)
+        event = Event(organiser_id=organiser_id, status=status, **defaults)
+        db.session.add(event)
+        db.session.commit()
+        return event.id
+    return _make
