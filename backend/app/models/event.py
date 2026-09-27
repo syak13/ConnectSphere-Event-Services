@@ -1,7 +1,10 @@
 from datetime import datetime
+from app.common.time import utcnow
 
 from app.extensions import db
 
+created_at = db.Column(db.DateTime, default=utcnow)
+updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 EVENT_STATUSES = (
     "draft", "submitted", "under_review", "approved",
     "planning", "confirmed", "completed", "cancelled", "rejected",
@@ -11,6 +14,7 @@ UNKNOWN_STATUS_LABEL = "Unknown status"
 
 class Event(db.Model):
     __tablename__ = "events"
+    __table_args__ = {'extend_existing': True}
 
     id = db.Column(db.BigInteger, primary_key=True)
     name = db.Column(db.String(255))
@@ -47,17 +51,26 @@ class Event(db.Model):
 
     resubmitted_from_event_id = db.Column(db.BigInteger, db.ForeignKey("events.id"))
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow())
+    updated_at = db.Column(db.DateTime, default=utcnow(), onupdate=utcnow())
     submitted_at = db.Column(db.DateTime)
 
     equipment_requirements = db.relationship(
         "EventEquipmentRequirement", backref="event", cascade="all, delete-orphan"
     )
-    reviews = db.relationship("EventReview", backref="event", cascade="all, delete-orphan")
+    reviews = db.relationship(
+        "EventReview",
+        foreign_keys="EventReview.event_id",
+        backref="event",
+        cascade="all, delete-orphan",
+    )
     status_history = db.relationship("EventStatusHistory", backref="event", cascade="all, delete-orphan")
     coordinator_history = db.relationship(
         "EventCoordinatorHistory", backref="event", cascade="all, delete-orphan"
+    )
+
+    clarification_responses = db.relationship(
+        "EventClarificationResponse", backref="event", cascade="all, delete-orphan"
     )
 
 
@@ -117,8 +130,8 @@ class EventEquipmentRequirement(db.Model):
     quantity = db.Column(db.Integer, nullable=False)
     technical_notes = db.Column(db.Text)
     status = db.Column(db.String(20), default="requested")
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=utcnow())
+    updated_at = db.Column(db.DateTime, default=utcnow(), onupdate=utcnow())
 
     def to_dict(self):
         return {
@@ -136,9 +149,10 @@ class EventReview(db.Model):
     id = db.Column(db.BigInteger, primary_key=True)
     event_id = db.Column(db.BigInteger, db.ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     coordinator_id = db.Column(db.BigInteger, db.ForeignKey("users.id"), nullable=False)
-    action = db.Column(db.String(30), nullable=False)  # clarification_requested/approved/rejected/returned
+    action = db.Column(db.String(30), nullable=False)
     comments = db.Column(db.Text)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    editable_fields = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, default=utcnow)
 
     def to_dict(self):
         return {
@@ -146,9 +160,36 @@ class EventReview(db.Model):
             "coordinatorId": self.coordinator_id,
             "action": self.action,
             "comments": self.comments,
+            "editableFields": self.editable_fields or [],
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
 
+class EventClarificationResponse(db.Model):
+    """One organiser response to one clarification request — the 'thread'.
+    review_id is UNIQUE: a clarification request can only ever be answered
+    once."""
+
+    __tablename__ = "event_clarification_responses"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    event_id = db.Column(db.BigInteger, db.ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    review_id = db.Column(
+        db.BigInteger, db.ForeignKey("event_reviews.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    organiser_id = db.Column(db.BigInteger, db.ForeignKey("users.id"), nullable=False)
+    comments = db.Column(db.Text, nullable=False)
+    updated_fields = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, default=utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "reviewId": self.review_id,
+            "organiserId": self.organiser_id,
+            "comments": self.comments,
+            "updatedFields": self.updated_fields or {},
+            "createdAt": self.created_at.isoformat() if self.created_at else None,
+        }
 
 class EventStatusHistory(db.Model):
     __tablename__ = "event_status_history"
@@ -159,7 +200,7 @@ class EventStatusHistory(db.Model):
     new_status = db.Column(db.String(20), nullable=False)
     changed_by = db.Column(db.BigInteger, db.ForeignKey("users.id"))
     reason = db.Column(db.Text)
-    changed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    changed_at = db.Column(db.DateTime, default=utcnow())
 
 
 class EventCoordinatorHistory(db.Model):
@@ -168,6 +209,6 @@ class EventCoordinatorHistory(db.Model):
     id = db.Column(db.BigInteger, primary_key=True)
     event_id = db.Column(db.BigInteger, db.ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     coordinator_id = db.Column(db.BigInteger, db.ForeignKey("users.id"), nullable=False)
-    assigned_at = db.Column(db.DateTime, default=datetime.utcnow)
+    assigned_at = db.Column(db.DateTime, default=utcnow())
     unassigned_at = db.Column(db.DateTime)
     assignment_type = db.Column(db.String(20), default="auto")  # auto | reassignment
