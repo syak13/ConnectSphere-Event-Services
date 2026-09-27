@@ -72,6 +72,20 @@ def test_date_and_time_are_stored_as_proper_types_not_strings(app, organiser):
             f"proposed_date is {type(event.proposed_date)}, expected datetime.date"
         )
 
+
+def test_time_round_trips_as_hhmm_without_seconds(app, organiser):
+    with app.app_context():
+        event = drafts.create_draft(organiser, dict(VALID_PAYLOAD))
+        payload = event.to_dict()
+        assert payload["proposedTime"] == "09:00"
+
+        event2 = drafts.create_draft(organiser, {
+            **dict(VALID_PAYLOAD),
+            "proposed_time": payload["proposedTime"],
+        })
+        assert event2.proposed_time.strftime("%H:%M") == "09:00"
+
+
 def test_equipment_requirements_are_saved(app, organiser):
     with app.app_context():
         payload = dict(VALID_PAYLOAD)
