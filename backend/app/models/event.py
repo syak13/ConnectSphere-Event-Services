@@ -83,6 +83,10 @@ class Event(db.Model):
         return STATUS_LABELS.get(self.status, UNKNOWN_STATUS_LABEL)
     
     def to_dict(self):
+        proposed_time = None
+        if self.proposed_time is not None:
+            proposed_time = self.proposed_time.strftime("%H:%M")
+
         return {
             "id": self.id,
             "name": self.name,
@@ -95,7 +99,7 @@ class Event(db.Model):
             "statusLabel": self.status_label,
             "statusValid": self.status_is_valid,
             "proposedDate": self.proposed_date.isoformat() if self.proposed_date else None,
-            "proposedTime": self.proposed_time.isoformat() if self.proposed_time else None,
+            "proposedTime": proposed_time,
             "expectedAttendance": self.expected_attendance,
             "venueRequirements": {
                 "capacityNeeded": self.capacity_needed,
