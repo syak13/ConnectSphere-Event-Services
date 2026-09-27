@@ -1,56 +1,58 @@
 <template>
   <div>
-    <h2>{{ isEditMode ? "Edit Draft Event Request" : "New Event Request" }}</h2>
-    <form @submit.prevent="submit">
-      <label>
-        Event Name
-        <input v-model="form.name" required />
-      </label>
-      <label>
-        Purpose 
-        <input v-model="form.purpose" required />
-      </label>
-      <label>
-        Description
-        <textarea v-model="form.description" required></textarea>
-      </label>
-      <label>
-        Proposed Date
-        <input v-model="form.proposed_date" type="date" />
-      </label>
-      <label>
-        Proposed Time
-        <input v-model="form.proposed_time" type="time" />
-      </label>
-      <label>
-        Expected Attendance
-        <input v-model.number="form.expected_attendance" type="number" min="1" />
-      </label>
-      <label>
-        Equipment Required
-        <input v-model.number="form.capacity_needed" type="number" min="1" />
-      </label>
-      <label>
-        Venue Required
-        <input v-model="form.required_layout" placeholder="e.g. theatre, banquet" />
-      </label>
-      <label>
-        Accessibility Needs
-        <textarea v-model="form.accessibility_needs"></textarea>
-      </label>
-      <label class="checkbox">
-        <input v-model="form.registration_required" type="checkbox" />
-        Registration required
-      </label>
+    <h2 class="page-title">{{ isEditMode ? "Edit Draft Event Request" : "New Event Request" }}</h2>
+    <div class="card">
+      <form @submit.prevent="submit">
+        <label>
+          Name
+          <input v-model="form.name" required />
+        </label>
+        <label>
+          Purpose
+          <input v-model="form.purpose" required />
+        </label>
+        <label>
+          Description
+          <textarea v-model="form.description" required></textarea>
+        </label>
+        <label>
+          Proposed Date
+          <input v-model="form.proposed_date" type="date" />
+        </label>
+        <label>
+          Proposed Time
+          <input v-model="form.proposed_time" type="time" />
+        </label>
+        <label>
+          Expected Attendance
+          <input v-model.number="form.expected_attendance" type="number" min="1" />
+        </label>
+        <label>
+          Capacity Needed
+          <input v-model.number="form.capacity_needed" type="number" min="1" />
+        </label>
+        <label>
+          Required Layout
+          <input v-model="form.required_layout" placeholder="e.g. theatre, banquet" />
+        </label>
+        <label>
+          Accessibility Needs
+          <textarea v-model="form.accessibility_needs"></textarea>
+        </label>
+        <label class="checkbox">
+          <input v-model="form.registration_required" type="checkbox" />
+          Registration required
+        </label>
 
-      <p v-if="error" class="error">{{ error }}</p>
-      <div class="actions">
-        <button type="button" @click="saveDraft">
-          {{ isEditMode ? "Save Changes" : "Save as Draft" }}
-        </button>
-        <button type="submit">Submit Now</button>
-      </div>
-    </form>
+        <p v-if="error" class="error full">{{ error }}</p>
+        <div class="actions full">
+          <button type="button" class="btn-draft" @click="saveDraft">
+            {{ isEditMode ? "Save Changes" : "Save as Draft" }}
+          </button>
+          <button type="submit" class="btn-submit">Submit Now</button>
+        </div>
+      </form>
+    </div>
   </div>
 </template>
 
@@ -132,13 +134,35 @@ async function saveDraft() {
   }
 }
 
+const FIELD_LABELS = {
+  proposed_date: "Proposed Date",
+  proposed_time: "Proposed Time",
+  expected_attendance: "Expected Attendance",
+  capacity_needed: "Capacity Needed",
+  required_layout: "Required Layout",
+  accessibility_needs: "Accessibility Needs",
+  name: "Name",
+  purpose: "Purpose",
+  description: "Description",
+};
+
+function friendlyError(rawMessage) {
+  const match = rawMessage?.match(/Missing required field\(s\):\s*(.+)/i);
+  if (!match) return rawMessage;
+
+  const fields = match[1].split(",").map((f) => f.trim());
+  const labels = fields.map((f) => FIELD_LABELS[f] || f);
+
+  return `Please fill in: ${labels.join(", ")}`;
+}
+
 async function submit() {
   error.value = "";
   try {
-    await eventsApi.createEvent({...sanitizePayload(form), submit: true, });
+    await eventsApi.createEvent({ ...sanitizePayload(form), submit: true });
     router.push({ name: "dashboard" });
   } catch (e) {
-    error.value = e.response?.data?.error || "Could not submit request";
+    error.value = friendlyError(e.response?.data?.error) || "Could not submit request";
   }
 }
 

@@ -126,19 +126,17 @@ nav a:focus-visible,
 
 .logout {
   padding: 0.4rem 0.95rem;
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 999px;
-  background: var(--surface);
-  color: var(--text);
+  background: var(--rose-bg);
+  color: var(--rose-text);
   font: inherit;
   font-weight: 500;
   cursor: pointer;
 }
 
 .logout:hover {
-  background: var(--rose-bg);
-  border-color: var(--rose-bg);
-  color: var(--rose-text);
+  background: #ffc9d4;
 }
 
 /* Page content area */
