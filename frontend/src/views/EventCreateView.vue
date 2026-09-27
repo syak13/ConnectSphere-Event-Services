@@ -3,11 +3,11 @@
     <h2>{{ isEditMode ? "Edit Draft Event Request" : "New Event Request" }}</h2>
     <form @submit.prevent="submit">
       <label>
-        Name
+        Event Name
         <input v-model="form.name" required />
       </label>
       <label>
-        Purpose
+        Purpose 
         <input v-model="form.purpose" required />
       </label>
       <label>
@@ -27,11 +27,11 @@
         <input v-model.number="form.expected_attendance" type="number" min="1" />
       </label>
       <label>
-        Capacity Needed
+        Equipment Required
         <input v-model.number="form.capacity_needed" type="number" min="1" />
       </label>
       <label>
-        Required Layout
+        Venue Required
         <input v-model="form.required_layout" placeholder="e.g. theatre, banquet" />
       </label>
       <label>

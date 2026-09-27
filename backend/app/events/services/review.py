@@ -10,13 +10,18 @@ Event Review and Approval
 - Organiser views review outcome and comments (routes.py)
 """
 from datetime import datetime
+from app.common.time import utcnow
+import re
 
 from app.extensions import db
 from app.events.services.assignment import assign_coordinator
 from app.events.services.status import InvalidTransitionError, change_status
-from app.models.event import Event, EventReview
+from app.models.event import Event, EventClarificationResponse, EventReview
 
 from app.events.services.validators import validate_for_submission
+from sqlalchemy.exc import IntegrityError
+
+_COMMENT_CONTAINS_WORD = re.compile(r"[A-Za-z]")
 
 def submit_event(event: Event, organiser_id: int) -> Event:
     if event.organiser_id != organiser_id:
@@ -28,7 +33,7 @@ def submit_event(event: Event, organiser_id: int) -> Event:
     if errors:
         raise ValueError("Cannot submit: " + "; ".join(errors))
 
-    event.submitted_at = datetime.utcnow()
+    event.submitted_at = utcnow()
     change_status(event, "submitted", changed_by_id=organiser_id)
 
     # Coordinator Assignment epic: exactly one Coordinator auto-assigned here,
@@ -38,39 +43,92 @@ def submit_event(event: Event, organiser_id: int) -> Event:
     return event
 
 
-def request_clarification(event: Event, coordinator_id: int, comments: str) -> Event:
+def request_clarification(event: Event, coordinator_id: int, comments: str, editable_fields: list = None) -> Event:
     if event.coordinator_id != coordinator_id:
         raise PermissionError("Only the assigned Coordinator can request clarification")
     if event.status != "under_review":
         raise ValueError("Clarification can only be requested while a request is under review")
-    if not comments:
-        raise ValueError("Clarification comments are required")
+    if not comments or not comments.strip():
+        raise ValueError("At least one clarification comment is required")
+    if not _COMMENT_CONTAINS_WORD.search(comments):
+        raise ValueError("Clarification comments must contain descriptive text, not just symbols or numbers")
 
-    event.clarification_flag = True
-    event.clarification_comments = comments
+    from app.events.services.drafts import CLARIFICATION_EDITABLE_FIELD_CHOICES  # local import avoids circular import
+
+    editable_fields = editable_fields or []
+    invalid_fields = [f for f in editable_fields if f not in CLARIFICATION_EDITABLE_FIELD_CHOICES]
+    if invalid_fields:
+        raise ValueError(f"Unknown field(s) in editableFields: {', '.join(invalid_fields)}")
+
     db.session.add(
         EventReview(
             event_id=event.id,
             coordinator_id=coordinator_id,
             action="clarification_requested",
             comments=comments,
+            editable_fields=editable_fields,
         )
     )
+
+    # clarification_flag now just means "at least one open request exists" -
+    # any number of requests can be open at once, each answered independently
+    event.clarification_flag = True
+    event.clarification_comments = comments
     db.session.commit()
     return event
 
 
-def respond_to_clarification(event: Event, organiser_id: int, data: dict) -> Event:
+def respond_to_clarification(event: Event, organiser_id: int, review_id: int, data: dict) -> Event:
     if event.organiser_id != organiser_id:
         raise PermissionError("Only the requesting Organiser can respond")
-    if not event.clarification_flag:
-        raise ValueError("This request has no outstanding clarification")
+
+    target_review = next(
+        (r for r in event.reviews if r.id == review_id and r.action == "clarification_requested"),
+        None,
+    )
+    if target_review is None:
+        raise ValueError("No such clarification request for this event")
+
+    if EventClarificationResponse.query.filter_by(review_id=review_id).first():
+        raise ValueError("This clarification has already been responded to")
+
+    comments = data.get("comments", "")
+    if not comments or not comments.strip():
+        raise ValueError("At least one response comment is required")
+    if not _COMMENT_CONTAINS_WORD.search(comments):
+        raise ValueError("Response comments must contain descriptive text, not just symbols or numbers")
+
+    allowed_fields = target_review.editable_fields or []
+    restricted_data = {k: v for k, v in data.items() if k in allowed_fields}
 
     from app.events.services.drafts import _apply_fields  # local import avoids circular import
 
-    _apply_fields(event, data)
-    event.clarification_flag = False
-    db.session.commit()
+    _apply_fields(event, restricted_data)
+
+    db.session.add(
+        EventClarificationResponse(
+            event_id=event.id,
+            review_id=review_id,
+            organiser_id=organiser_id,
+            comments=comments,
+            updated_fields=restricted_data,
+        )
+    )
+
+    answered_review_ids = {
+        r.review_id for r in EventClarificationResponse.query.filter_by(event_id=event.id).all()
+    }
+    answered_review_ids.add(review_id)
+    event.clarification_flag = any(
+        r.action == "clarification_requested" and r.id not in answered_review_ids for r in event.reviews
+    )
+
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        raise ValueError("This clarification has already been responded to")
+
     return event
 
 
@@ -82,7 +140,7 @@ def approve_event(event: Event, coordinator_id: int, comments: str = None) -> Ev
 
     event.review_outcome = "approved"
     event.review_reason = comments
-    event.review_timestamp = datetime.utcnow()
+    event.review_timestamp = utcnow()
     event.review_coordinator_id = coordinator_id
     db.session.add(
         EventReview(event_id=event.id, coordinator_id=coordinator_id, action="approved", comments=comments)
@@ -101,7 +159,7 @@ def reject_event(event: Event, coordinator_id: int, reason: str) -> Event:
 
     event.review_outcome = "rejected"
     event.review_reason = reason
-    event.review_timestamp = datetime.utcnow()
+    event.review_timestamp = utcnow()
     event.review_coordinator_id = coordinator_id
     db.session.add(
         EventReview(event_id=event.id, coordinator_id=coordinator_id, action="rejected", comments=reason)
@@ -144,3 +202,28 @@ def resubmit_rejected_event(original: Event, organiser_id: int, data: dict) -> E
         db.session.commit()
 
     return submit_event(new_event, organiser_id)
+
+def get_clarification_thread(event: Event) -> list:
+    """Every clarification request paired with its response (or None if
+    still awaiting one), in chronological order. Each request carries the
+    specific fields the Coordinator opened up for THAT request, so several
+    can be open at once and answered independently."""
+    responses_by_review = {r.review_id: r for r in event.clarification_responses}
+    thread = []
+    for entry in event.reviews:
+        if entry.action != "clarification_requested":
+            continue
+        response = responses_by_review.get(entry.id)
+        thread.append(
+            {
+                "reviewId": entry.id,
+                "request": {
+                    "coordinatorId": entry.coordinator_id,
+                    "comments": entry.comments,
+                    "editableFields": entry.editable_fields or [],
+                    "createdAt": entry.created_at.isoformat() if entry.created_at else None,
+                },
+                "response": response.to_dict() if response else None,
+            }
+        )
+    return thread

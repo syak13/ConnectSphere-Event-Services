@@ -17,6 +17,10 @@ REGISTRATION_FIELDS = ["registration_required", "intended_capacity"]
 
 EDITABLE_FIELDS = CORE_FIELDS + SCHEDULE_FIELDS + VENUE_FIELDS + REGISTRATION_FIELDS
 
+# Fields a Coordinator may grant an Organiser permission to edit while
+# responding to a clarification request (Event Review and Approval).
+CLARIFICATION_EDITABLE_FIELD_CHOICES = EDITABLE_FIELDS + ["equipment_requirements"]
+
 def _parse_date(value):
     if value is None:
         return None
