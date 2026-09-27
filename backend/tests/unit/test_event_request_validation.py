@@ -127,3 +127,114 @@ def test_equipment_item_missing_type_is_blocked(app, organiser):
         ]
         errors = validate_for_submission(event)
         assert any("type" in e for e in errors)
+
+def test_missing_purpose_is_blocked(app, organiser):
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.purpose = ""
+        errors = validate_for_submission(event)
+        assert any("purpose" in e for e in errors)
+
+
+def test_missing_description_is_blocked(app, organiser):
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.description = ""
+        errors = validate_for_submission(event)
+        assert any("description" in e for e in errors)
+
+
+def test_missing_expected_attendance_is_blocked(app, organiser):
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.expected_attendance = None
+        errors = validate_for_submission(event)
+        assert any("expected_attendance" in e for e in errors)
+
+
+def test_zero_expected_attendance_is_blocked(app, organiser):
+    """Boundary case: 0 is not a negative number, but it's still invalid."""
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.expected_attendance = 0
+        errors = validate_for_submission(event)
+        assert any("Expected attendance" in e for e in errors)
+
+
+def test_zero_capacity_needed_is_blocked(app, organiser):
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.capacity_needed = 0
+        errors = validate_for_submission(event)
+        assert any("Venue capacity" in e for e in errors)
+
+
+def test_negative_capacity_needed_is_blocked(app, organiser):
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.capacity_needed = -10
+        errors = validate_for_submission(event)
+        assert any("Venue capacity" in e for e in errors)
+
+
+def test_negative_intended_capacity_is_blocked(app, organiser):
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.registration_required = True
+        event.intended_capacity = -5
+        errors = validate_for_submission(event)
+        assert any("Intended capacity" in e for e in errors)
+
+
+def test_proposed_date_today_is_allowed(app, organiser):
+    """Boundary case: today should NOT count as 'in the past'."""
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.proposed_date = date.today()
+        errors = validate_for_submission(event)
+        assert not any("past" in e for e in errors)
+
+
+def test_registration_not_required_ignores_leftover_intended_capacity(app, organiser):
+    """Edge case: registration_required is False but intended_capacity is
+    still set (e.g. left over from toggling the checkbox off) -- shouldn't
+    block submission, since the check only applies when registration is on."""
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.registration_required = False
+        event.intended_capacity = 30
+        assert validate_for_submission(event) == []
+
+
+def test_multiple_missing_fields_are_all_reported_together(app, organiser):
+    """UX case: a request missing several fields at once should surface
+    every problem in one pass, not just the first one found."""
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.name = ""
+        event.expected_attendance = -1
+        event.capacity_needed = None
+        errors = validate_for_submission(event)
+        assert any("name" in e for e in errors)
+        assert any("Expected attendance" in e for e in errors)
+        assert any("capacity_needed" in e for e in errors)
+
+
+def test_empty_equipment_list_is_valid(app, organiser):
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.equipment_requirements = []
+        assert validate_for_submission(event) == []
+
+
+def test_second_equipment_item_is_validated_independently(app, organiser):
+    """Edge case: the first item is fine, only the second is broken --
+    make sure it still gets caught rather than short-circuiting."""
+    with app.app_context():
+        event = _valid_event(organiser)
+        event.equipment_requirements = [
+            EventEquipmentRequirement(equipment_type="Microphone", quantity=2),
+            EventEquipmentRequirement(equipment_type="", quantity=1),
+        ]
+        errors = validate_for_submission(event)
+        assert any("Equipment item 2" in e for e in errors)
