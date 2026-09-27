@@ -16,7 +16,7 @@
       </label>
       <label>
         Proposed Date
-        <input v-model="form.proposed_date" type="date" />
+        <input v-model="form.proposed_date" type="date" :min="todayString" />
       </label>
       <label>
         Proposed Time
@@ -43,6 +43,16 @@
         Registration required
       </label>
 
+      <label v-if="form.registration_required">
+        Intended Capacity (optional)
+        <input
+          v-model.number="form.intended_capacity"
+          type="number"
+          min="1"
+          placeholder="Optional if not yet known"
+        />
+      </label>
+
       <p v-if="error" class="error">{{ error }}</p>
       <div class="actions">
         <button type="button" @click="saveDraft">
@@ -62,6 +72,7 @@ import eventsApi from "../api/events";
 const route = useRoute();
 const router = useRouter();
 const error = ref("");
+const todayString = new Date().toISOString().split("T")[0];
 
 const draftId = route.params.id;
 const isEditMode = Boolean(draftId);
@@ -76,6 +87,7 @@ const form = reactive({
   required_layout: "",
   accessibility_needs: "",
   registration_required: false,
+  intended_capacity: null,
 });
 
 async function loadDraft() {
@@ -94,13 +106,14 @@ async function loadDraft() {
       purpose: data.purpose || "",
       description: data.description || "",
       proposed_date: data.proposedDate || "",
-      proposed_time: data.proposedTime || "",
+      proposed_time: data.proposedTime ? data.proposedTime.slice(0, 5) : "",
       expected_attendance: data.expectedAttendance ?? null,
       capacity_needed: data.venueRequirements?.capacityNeeded ?? null,
       required_layout: data.venueRequirements?.requiredLayout || "",
       accessibility_needs:
         data.venueRequirements?.accessibilityNeeds || "",
       registration_required: data.registrationRequired ?? false,
+      intended_capacity: data.intendedCapacity ?? null,
     });
   } catch (e) {
     error.value = e.response?.data?.error || "Could not load this draft.";
@@ -111,11 +124,27 @@ function sanitizePayload(data) {
   const cleaned = { ...data };
   if (cleaned.proposed_date === "") cleaned.proposed_date = null;
   if (cleaned.proposed_time === "") cleaned.proposed_time = null;
+  if (cleaned.intended_capacity === "") cleaned.intended_capacity = null;
   return cleaned;
+}
+
+function validateDate() {
+  if (!form.proposed_date) return true;
+
+  if (form.proposed_date < todayString) {
+    error.value = "Proposed date cannot be in the past.";
+    return false;
+  }
+
+  return true;
 }
 
 async function saveDraft() {
   error.value = "";
+
+  if (!validateDate()) {
+    return;
+  }
 
   try {
     const payload = sanitizePayload(form);
@@ -134,8 +163,21 @@ async function saveDraft() {
 
 async function submit() {
   error.value = "";
+
+  if (!validateDate()) {
+    return;
+  }
+
   try {
-    await eventsApi.createEvent({...sanitizePayload(form), submit: true, });
+    const payload = sanitizePayload(form);
+
+    if (isEditMode) {
+      await eventsApi.updateDraft(draftId, payload);
+      await eventsApi.submitEvent(draftId);
+    } else {
+      await eventsApi.createEvent({ ...payload, submit: true });
+    }
+
     router.push({ name: "dashboard" });
   } catch (e) {
     error.value = e.response?.data?.error || "Could not submit request";
