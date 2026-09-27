@@ -188,6 +188,9 @@ CREATE TABLE event_status_history (
     INDEX idx_esh_event (event_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+ALTER TABLE event_status_history
+ADD COLUMN affected_fields JSON NULL;
+
 -- ---------------------------------------------------------------------
 -- Coordinator Assignment — auto-assignment + reassignment history
 -- (keeps previous coordinator's read-only visibility)
