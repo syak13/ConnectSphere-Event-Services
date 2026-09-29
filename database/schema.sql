@@ -95,6 +95,9 @@ CREATE TABLE events (
     clarification_flag      TINYINT(1) NOT NULL DEFAULT 0,   -- sub-state of under_review
     clarification_comments  TEXT NULL,
 
+    clarification_flag      TINYINT(1) NOT NULL DEFAULT 0,   -- sub-state of under_review
+    clarification_comments  TEXT NULL,
+    
     -- reviewDecision snapshot (latest decision; full history in event_reviews)
     review_outcome          ENUM('approved','rejected','returned') NULL,
     review_reason           TEXT NULL,
@@ -111,6 +114,7 @@ CREATE TABLE events (
     CONSTRAINT fk_events_coordinator FOREIGN KEY (coordinator_id) REFERENCES users(id),
     CONSTRAINT fk_events_review_coordinator FOREIGN KEY (review_coordinator_id) REFERENCES users(id),
     CONSTRAINT fk_events_resubmitted_from FOREIGN KEY (resubmitted_from_event_id) REFERENCES events(id),
+
     INDEX idx_events_organiser (organiser_id),
     INDEX idx_events_coordinator (coordinator_id),
     INDEX idx_events_status (status),
@@ -143,10 +147,28 @@ CREATE TABLE event_reviews (
     coordinator_id  BIGINT UNSIGNED NOT NULL,
     action          ENUM('clarification_requested','approved','rejected','returned') NOT NULL,
     comments        TEXT NULL,
+    editable_fields JSON NULL,  -- fields the Organiser may edit when responding to THIS specific request
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_er_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
     CONSTRAINT fk_er_coordinator FOREIGN KEY (coordinator_id) REFERENCES users(id),
     INDEX idx_er_event (event_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- One response per clarification request, enforced by the UNIQUE on review_id.
+-- This is the "thread": each row pairs 1:1 with the event_reviews row
+-- (action='clarification_requested') it answers.
+CREATE TABLE event_clarification_responses (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id        BIGINT UNSIGNED NOT NULL,
+    review_id       BIGINT UNSIGNED NOT NULL UNIQUE,
+    organiser_id    BIGINT UNSIGNED NOT NULL,
+    comments        TEXT NOT NULL,
+    updated_fields  JSON NULL,
+    created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_ecr_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ecr_review FOREIGN KEY (review_id) REFERENCES event_reviews(id) ON DELETE CASCADE,
+    CONSTRAINT fk_ecr_organiser FOREIGN KEY (organiser_id) REFERENCES users(id),
+    INDEX idx_ecr_event (event_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 -- ---------------------------------------------------------------------
@@ -165,6 +187,9 @@ CREATE TABLE event_status_history (
     CONSTRAINT fk_esh_user FOREIGN KEY (changed_by) REFERENCES users(id),
     INDEX idx_esh_event (event_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+ALTER TABLE event_status_history
+ADD COLUMN affected_fields JSON NULL;
 
 -- ---------------------------------------------------------------------
 -- Coordinator Assignment — auto-assignment + reassignment history

@@ -28,6 +28,8 @@ export const useAuthStore = defineStore("auth", {
           {},
           { headers: { Authorization: `Bearer ${this.refreshToken}` } }
         );
+      } catch (err) {
+        console.warn("Logout request failed, clearing session anyway", err);
       } finally {
         this.accessToken = null;
         this.refreshToken = null;

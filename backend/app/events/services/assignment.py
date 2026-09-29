@@ -9,6 +9,7 @@ Coordinator Assignment
 - Previous coordinator retains read-only visibility after reassignment
 """
 from datetime import datetime
+from app.common.time import utcnow
 
 from sqlalchemy import func
 
@@ -75,7 +76,7 @@ def reassign_coordinator(event: Event, new_coordinator: User) -> Event:
         ).first()
     )
     if open_entry:
-        open_entry.unassigned_at = datetime.utcnow()
+        open_entry.unassigned_at = utcnow()
 
     return assign_coordinator(event, coordinator=new_coordinator, assignment_type="reassignment")
 
