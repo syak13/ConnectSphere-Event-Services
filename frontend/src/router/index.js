@@ -7,10 +7,23 @@ import DraftsView from "../views/DraftsView.vue";
 import EventCreateView from "../views/EventCreateView.vue";
 import ReviewQueueView from "../views/ReviewQueueView.vue";
 import EventDetailView from "../views/EventDetailView.vue";
+import PlanningView from "../views/PlanningView.vue";
+import CoordinatorCalendar from "../components/CoordinatorCalendar.vue";
 
 
 const routes = [
   { path: "/login", name: "login", component: LoginView },
+
+  { path: "/", name: "dashboard", component: DashboardView, meta: { requiresAuth: true } },
+  { path: "/drafts", name: "drafts", component: DraftsView, meta: { requiresAuth: true } },
+  { path: "/events/new", name: "event-create", component: EventCreateView, meta: { requiresAuth: true } },
+  { path: "/review", name: "review-queue", component: ReviewQueueView, meta: { requiresAuth: true } },
+  { path: "/events/:id", name: "event-detail", component: EventDetailView, meta: { requiresAuth: true } },
+  // Added: Coordinators view unassigned events for planning visibility
+  { path: "/planning", name: "planning", component: PlanningView, meta: { requiresAuth: true } },
+  // Added: previous coordinator retains read-only visibility after reassignment
+  { path: "/calendar", name: "calendar", component: CoordinatorCalendar, meta: { requiresAuth: true } },
+
 
   {
     path: "/",
@@ -53,6 +66,7 @@ const routes = [
     component: EventDetailView,
     meta: { requiresAuth: true },
   },
+
 ];
 
 const router = createRouter({

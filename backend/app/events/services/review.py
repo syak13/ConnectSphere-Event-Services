@@ -37,8 +37,20 @@ def submit_event(event: Event, organiser_id: int) -> Event:
     change_status(event, "submitted", changed_by_id=organiser_id)
 
     # Coordinator Assignment epic: exactly one Coordinator auto-assigned here,
-    # in the same action that moves the event into review (shared contract 3.4)
-    assign_coordinator(event)
+    # in the same action that moves the event into review (shared contract 3.4).
+    #
+    # If no active Coordinator is available right now, that is a valid,
+    # non-error outcome rather than a failed submission: the request has
+    # already been recorded as "submitted" above, so we leave it there,
+    # unassigned. It becomes visible to Coordinators as an unassigned event
+    # (see assignment.list_unassigned_events / the Planning view) and can be
+    # picked up automatically later via assignment.try_assign_and_advance,
+    # without ever exposing a manual self-assign step.
+    try:
+        assign_coordinator(event)
+    except ValueError:
+        return event
+
     change_status(event, "under_review", changed_by_id=event.coordinator_id)
     return event
 

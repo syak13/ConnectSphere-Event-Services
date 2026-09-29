@@ -1,7 +1,14 @@
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt, get_jwt_identity, jwt_required
 
-from app.auth.services import authenticate, is_refresh_token_valid, issue_tokens, revoke_refresh_token
+from app.auth.decorators import roles_required
+from app.auth.services import (
+    authenticate,
+    is_refresh_token_valid,
+    issue_tokens,
+    list_active_users,
+    revoke_refresh_token,
+)
 from app.models.user import User
 
 auth_bp = Blueprint("auth", __name__)
@@ -56,3 +63,14 @@ def me():
     if not user:
         return jsonify({"error": "User not found"}), 404
     return jsonify(user.to_dict()), 200
+
+
+@auth_bp.get("/users")
+@roles_required("event_coordinator")
+def list_users():
+    """Active users, optionally filtered by ?role=. Currently used to
+    populate the Coordinator picker for reassignment, so a Coordinator
+    doesn't have to know another Coordinator's raw user ID by heart."""
+    role_name = request.args.get("role")
+    users = list_active_users(role_name)
+    return jsonify([u.to_dict() for u in users]), 200

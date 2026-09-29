@@ -1,5 +1,31 @@
 <template>
   <div>
+
+    <h2>{{ auth.hasRole("event_coordinator") ? "Events Assigned to Me" : "My Events" }}</h2>
+    <table v-if="events.length">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Proposed Date/Time</th>
+          <th>Venue Reqs.</th>
+          <th v-if="auth.hasRole('event_coordinator')">Organiser</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="e in events" :key="e.id">
+          <td>{{ e.name || "(untitled)" }}</td>
+          <td><span class="badge" :class="e.status">{{ e.status }}</span></td>
+          <td>{{ e.proposedDate || "—" }} {{ e.proposedTime || "" }}</td>
+          <td>{{ venueSummary(e) }}</td>
+          <td v-if="auth.hasRole('event_coordinator')">{{ e.organiserName || "—" }}</td>
+          <td><router-link :to="`/events/${e.id}`">View</router-link></td>
+        </tr>
+      </tbody>
+    </table>
+    <p v-else>No events yet.</p>
+
     <h2 class="page-title">
       {{ auth.hasRole("event_coordinator") ? "Events Assigned to Me" : "My Events" }}
     </h2>
@@ -59,6 +85,7 @@
         Create an event
       </router-link>
     </div>
+
   </div>
 </template>
 
@@ -69,6 +96,16 @@ import eventsApi from "../api/events";
 
 const auth = useAuthStore();
 const events = ref([]);
+
+
+// Summary for the "Venue Reqs." column — this project doesn't have an actual
+// booked-venue entity yet (only what the Organiser requested), so this shows
+// requirements, not a confirmed venue.
+function venueSummary(e) {
+  const v = e.venueRequirements;
+  if (!v || (!v.capacityNeeded && !v.requiredLayout)) return "—";
+  return [v.capacityNeeded ? `${v.capacityNeeded} pax` : null, v.requiredLayout].filter(Boolean).join(", ");
+}
 
 // "under_review" -> "under review"
 const statusLabel = (status) => (status || "").replace(/_/g, " ");
@@ -82,6 +119,7 @@ const stats = computed(() => {
     closed: count(["rejected", "cancelled"]),
   };
 });
+
 
 onMounted(async () => {
   const call = auth.hasRole("event_coordinator") ? eventsApi.assignedEvents : eventsApi.myEvents;

@@ -13,6 +13,7 @@ from app.common.time import utcnow
 
 from sqlalchemy import func
 
+from app.events.services.status import change_status
 from app.extensions import db
 from app.models.event import Event, EventCoordinatorHistory
 from app.models.user import Role, User
@@ -84,3 +85,65 @@ def has_coordinator_history(event: Event, user_id: int) -> bool:
     """True if user_id is or ever was a coordinator on this event (keeps
     previous coordinators' read-only visibility after reassignment)."""
     return any(h.coordinator_id == user_id for h in event.coordinator_history)
+
+
+# Events can end up with coordinator_id = NULL while already "submitted" if
+# no Coordinator was available at auto-assign time (see assign_coordinator's
+# ValueError path in submit_event) — so this must be checked in addition to
+# OPEN_STATUSES, not just at "under_review" onward.
+UNASSIGNED_VISIBLE_STATUSES = ("submitted",) + OPEN_STATUSES
+
+
+def list_unassigned_events():
+    """Events with no assigned Coordinator, surfaced to all Coordinators for
+    planning visibility only. There is no self-assign / claim action here —
+    reassignment (and initial assignment) is deliberately Coordinator-to-
+    Coordinator via assign_coordinator/reassign_coordinator, per Q&A #6/#13/#22."""
+    return (
+        Event.query.filter(
+            Event.coordinator_id.is_(None),
+            Event.status.in_(UNASSIGNED_VISIBLE_STATUSES),
+        )
+        .order_by(Event.proposed_date.asc())
+        .all()
+    )
+
+
+def try_assign_and_advance(event: Event) -> Event:
+    """Retries automatic assignment for an event that was submitted while no
+    Coordinator was available (see review.submit_event) and, on success,
+    advances it into under_review the same way a normal submission would.
+
+    get_next_coordinator() still makes the actual pick here — the caller
+    (any Coordinator, via the Planning view) only triggers the retry, never
+    chooses who receives it. That keeps this consistent with "no manual
+    self-assignment and no accept/decline step.\""""
+    if event.coordinator_id is not None:
+        raise ValueError("This event already has an assigned Coordinator")
+    if event.status != "submitted":
+        raise ValueError("Only a submitted, unassigned event can be auto-assigned")
+
+    assign_coordinator(event)  # raises ValueError again if still nobody available
+    change_status(event, "under_review", changed_by_id=event.coordinator_id)
+    return event
+
+
+def coordinator_calendar(user_id: int):
+    """Every event user_id currently coordinates or has ever coordinated.
+    Events they no longer own are included read-only (isReadOnly=True) so a
+    previous Coordinator keeps visibility after handing an event off."""
+    history = (
+        EventCoordinatorHistory.query.filter_by(coordinator_id=user_id)
+        .order_by(EventCoordinatorHistory.assigned_at.desc())
+        .all()
+    )
+
+    seen_event_ids = set()
+    results = []
+    for entry in history:
+        if entry.event_id in seen_event_ids:
+            continue
+        seen_event_ids.add(entry.event_id)
+        event = entry.event
+        results.append({**event.to_dict(), "isReadOnly": event.coordinator_id != user_id})
+    return results

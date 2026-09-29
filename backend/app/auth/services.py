@@ -4,7 +4,7 @@ from flask_jwt_extended import create_access_token, create_refresh_token, decode
 from werkzeug.security import check_password_hash
 
 from app.extensions import db
-from app.models.user import RefreshToken, User
+from app.models.user import RefreshToken, Role, User
 
 
 def authenticate(email: str, password: str):
@@ -45,3 +45,13 @@ def revoke_refresh_token(jti: str):
 def is_refresh_token_valid(jti: str) -> bool:
     token = RefreshToken.query.filter_by(jti=jti).first()
     return bool(token and not token.revoked)
+
+
+def list_active_users(role_name: str = None):
+    """Active users, optionally filtered to one role. Used to populate
+    Coordinator pickers (e.g. the reassignment dropdown) without making the
+    caller pass raw user IDs by hand."""
+    query = User.query.filter_by(is_active=True)
+    if role_name:
+        query = query.join(User.roles).filter(Role.name == role_name)
+    return query.order_by(User.name.asc()).all()
