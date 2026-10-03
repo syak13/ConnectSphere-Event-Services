@@ -1,22 +1,13 @@
 <template>
   <div id="layout">
     <nav v-if="auth.isAuthenticated">
-
-      <router-link to="/">Dashboard</router-link>
-      <router-link v-if="auth.hasRole('event_organiser')" to="/events/new">New Request</router-link>
-      <router-link v-if="auth.hasRole('event_organiser')" to="/drafts">My Drafts</router-link>
-      <router-link v-if="auth.hasRole('event_coordinator')" to="/review">Review Queue</router-link>
-      <router-link v-if="auth.hasRole('event_coordinator')" to="/planning">Planning View</router-link>
-      <router-link v-if="auth.hasRole('event_coordinator')" to="/calendar">My Calendar</router-link>
-      <span class="spacer" />
-      <span>{{ auth.user?.name }}</span>
-      <button @click="handleLogout">Logout</button>
-
       <div class="nav-inner">
         <router-link to="/">Dashboard</router-link>
         <router-link v-if="auth.hasRole('event_organiser')" to="/events/new">New Request</router-link>
         <router-link v-if="auth.hasRole('event_organiser')" to="/drafts">My Drafts</router-link>
         <router-link v-if="auth.hasRole('event_coordinator')" to="/review">Review Queue</router-link>
+        <router-link v-if="auth.hasRole('event_coordinator')" to="/planning">Planning View</router-link>
+        <router-link v-if="auth.hasRole('event_coordinator')" to="/calendar">My Calendar</router-link>
         <span class="spacer" />
         <span class="user-name">{{ auth.user?.name }}</span>
         <button class="logout" @click="handleLogout">Logout</button>

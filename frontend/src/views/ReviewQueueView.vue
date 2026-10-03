@@ -1,31 +1,5 @@
 <template>
   <div>
-
-    <h2>Review Queue</h2>
-    <table v-if="events.length">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Status</th>
-          <th>Proposed Date/Time</th>
-          <th>Venue Reqs.</th>
-          <th>Organiser</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr v-for="e in events" :key="e.id">
-          <td>{{ e.name }}</td>
-          <td><span class="badge" :class="e.status">{{ e.status }}</span></td>
-          <td>{{ e.proposedDate || "—" }} {{ e.proposedTime || "" }}</td>
-          <td>{{ venueSummary(e) }}</td>
-          <td>{{ e.organiserName || "—" }}</td>
-          <td><router-link :to="`/events/${e.id}`">Review</router-link></td>
-        </tr>
-      </tbody>
-    </table>
-    <p v-else>No assigned requests.</p>
-
     <h2 class="page-title">Review Queue</h2>
 
     <div v-if="events.length" class="card">
@@ -35,7 +9,9 @@
             <tr>
               <th>Name</th>
               <th>Status</th>
-              <th>Proposed Date</th>
+              <th>Proposed Date/Time</th>
+              <th>Venue Reqs.</th>
+              <th>Organiser</th>
               <th></th>
             </tr>
           </thead>
@@ -45,7 +21,9 @@
               <td>
                 <span class="badge" :class="e.status">{{ statusLabel(e.status) }}</span>
               </td>
-              <td class="muted">{{ e.proposedDate || "—" }}</td>
+              <td class="muted">{{ e.proposedDate || "—" }} {{ e.proposedTime || "" }}</td>
+              <td>{{ venueSummary(e) }}</td>
+              <td>{{ e.organiserName || "—" }}</td>
               <td class="action">
                 <router-link :to="`/events/${e.id}`" class="review-link">Review</router-link>
               </td>
