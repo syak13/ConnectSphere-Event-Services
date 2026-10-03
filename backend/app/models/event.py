@@ -69,6 +69,7 @@ class Event(db.Model):
         "EventCoordinatorHistory", backref="event", cascade="all, delete-orphan"
     )
 
+    review_coordinator = db.relationship("User", foreign_keys=[review_coordinator_id])
     # Added so list/detail views can show who requested and who's handling an
     # event by name, instead of only a raw id (Coordinator Assignment AC:
     # assigned-requests summary must show the requesting Organiser).
@@ -125,6 +126,7 @@ class Event(db.Model):
                 "reason": self.review_reason,
                 "timestamp": self.review_timestamp.isoformat() if self.review_timestamp else None,
                 "coordinatorId": self.review_coordinator_id,
+                "coordinatorName": self.review_coordinator.name if self.review_coordinator else None,
             },
             "resubmittedFromEventId": self.resubmitted_from_event_id,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
@@ -164,6 +166,7 @@ class EventReview(db.Model):
     action = db.Column(db.String(30), nullable=False)
     comments = db.Column(db.Text)
     editable_fields = db.Column(db.JSON, nullable=True)
+    withdrawn_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=utcnow)
 
     def to_dict(self):
@@ -173,6 +176,7 @@ class EventReview(db.Model):
             "action": self.action,
             "comments": self.comments,
             "editableFields": self.editable_fields or [],
+            "withdrawnAt": self.withdrawn_at.isoformat() if self.withdrawn_at else None,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
 

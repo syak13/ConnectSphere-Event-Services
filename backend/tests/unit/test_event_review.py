@@ -2,18 +2,20 @@ import pytest
 from datetime import datetime, timezone, date, time
 from werkzeug.security import generate_password_hash
 from app.models.event import Event, EventReview, EventClarificationResponse
-from app.events.routes import _build_display_fields  # pure/stateless helper, safe to import directly
+from app.events.routes import _build_display_fields, _require_confirmation  # both pure/stateless, safe to import directly
 from app.models.user import Role, User
 from app.events.services.review import (
     request_clarification,
     approve_event,
     reject_event,
     get_clarification_thread,
-    respond_to_clarification
+    respond_to_clarification,
+    delete_clarification_request,
 )
-from app.events.services.status import InvalidTransitionError
+from app.events.services.status import InvalidTransitionError, change_status
 from app.events.services.assignment import assign_coordinator, reassign_coordinator
 from app.extensions import db
+from app.common.text_validation import validate_descriptive_text
 
 @pytest.fixture(scope="function")
 def test_db(app):
@@ -93,7 +95,7 @@ def test_request_clarification(app, event, coordinator):
 
 def test_clarification_requires_valid_comment(app, event, coordinator):
     with app.app_context():
-        with pytest.raises(ValueError, match="Clarification comments must contain descriptive text"):
+        with pytest.raises(ValueError, match="Clarification comment must contain descriptive text"):
             request_clarification(event, coordinator["id"], "!!!")
 
 def test_reject_event(app, event, coordinator):
@@ -114,6 +116,7 @@ def test_invalid_status_for_review(app, event, coordinator):
         with pytest.raises(ValueError, match="Clarification can only be requested while a request is under review"):
             request_clarification(event, coordinator["id"], "Need more details")
 
+
 # =======================================================================
 # Clarification requests: comment validation and editable-fields grant
 # =======================================================================
@@ -121,7 +124,7 @@ def test_invalid_status_for_review(app, event, coordinator):
 @pytest.mark.parametrize("invalid_comment", ["!!!", "12345", "@@@###", "-----", "123-456-7890"])
 def test_request_clarification_symbols_or_digits_only_is_rejected(app, event, coordinator, invalid_comment):
     with app.app_context():
-        with pytest.raises(ValueError, match="Clarification comments must contain descriptive text"):
+        with pytest.raises(ValueError, match="Clarification comment must contain descriptive text"):
             request_clarification(event, coordinator["id"], invalid_comment)
 
 
@@ -201,7 +204,7 @@ def test_reject_event_requires_assigned_coordinator(app, event, second_coordinat
 
 def test_reject_event_requires_a_reason(app, event, coordinator):
     with app.app_context():
-        with pytest.raises(ValueError, match="A reason is required to reject a request"):
+        with pytest.raises(ValueError, match="At least one rejection reason is required"):
             reject_event(event, coordinator["id"], "")
 
 
@@ -451,3 +454,256 @@ def test_reassign_coordinator_updates_assignment_and_history(app, two_real_coord
         history_ids = [h.coordinator_id for h in new_event.coordinator_history]
         assert coordinator_a_id in history_ids
         assert coordinator_b_id in history_ids
+
+# =======================================================================
+# Shared reason validation: rejection & cancellation follow the same
+# rules as clarification comments (validate_descriptive_text)
+# =======================================================================
+
+@pytest.mark.parametrize("invalid_reason", ["!!!", "12345", "@@@###", "-----", "123-456-7890"])
+def test_reject_event_rejects_symbols_or_digits_only_reason(app, event, coordinator, invalid_reason):
+    with app.app_context():
+        with pytest.raises(ValueError, match="must contain descriptive text"):
+            reject_event(event, coordinator["id"], invalid_reason)
+
+
+def test_reject_event_rejects_blank_reason_with_shared_validation_message(app, event, coordinator):
+    with app.app_context():
+        with pytest.raises(ValueError, match="At least one rejection reason is required"):
+            reject_event(event, coordinator["id"], "")
+
+
+def test_reject_event_accepts_reason_with_real_words(app, event, coordinator):
+    with app.app_context():
+        updated = reject_event(event, coordinator["id"], "Insufficient lead time for setup.")
+        assert updated.status == "rejected"
+        assert updated.review_reason == "Insufficient lead time for setup."
+
+
+@pytest.mark.parametrize("invalid_reason", ["!!!", "12345", "", "   "])
+def test_validate_descriptive_text_rejects_invalid_cancellation_reason(invalid_reason):
+    # Cancellation reuses this exact shared helper (see cancel_event_route
+    # in routes.py) — testing it directly here proves cancellation follows
+    # the same rule as clarification comments and rejection reasons.
+    with pytest.raises(ValueError):
+        validate_descriptive_text(invalid_reason, "cancellation reason")
+
+
+def test_validate_descriptive_text_accepts_a_real_cancellation_reason():
+    validate_descriptive_text("Venue became unavailable due to flooding.", "cancellation reason")
+
+
+def test_change_status_allows_cancelling_directly_from_under_review(app, event):
+    with app.app_context():
+        updated = change_status(event, "cancelled", changed_by_id=event.coordinator_id, reason="Testing")
+        assert updated.status == "cancelled"
+
+
+def test_change_status_allows_cancelling_directly_from_submitted(app, event):
+    with app.app_context():
+        event.status = "submitted"
+        updated = change_status(event, "cancelled", changed_by_id=event.coordinator_id, reason="Testing")
+        assert updated.status == "cancelled"
+
+
+# =======================================================================
+# Coordinator deletes (withdraws) a clarification request
+# =======================================================================
+
+def test_delete_clarification_request_by_assigned_coordinator(app, event, coordinator):
+    with app.app_context():
+        event.proposed_date = date(2023, 12, 1)
+        event.proposed_time = time(10, 0)
+        db.session.add(event)
+        db.session.commit()
+
+        request_clarification(event, coordinator["id"], "Please confirm the headcount.")
+        review_id = event.reviews[-1].id
+
+        updated = delete_clarification_request(event, coordinator["id"], review_id)
+
+        deleted_review = next(r for r in updated.reviews if r.id == review_id)
+        assert deleted_review.withdrawn_at is not None
+        assert updated.clarification_flag is False  # no other open requests
+
+
+def test_delete_clarification_request_requires_assigned_coordinator(app, event, coordinator, second_coordinator):
+    with app.app_context():
+        event.proposed_date = date(2023, 12, 1)
+        event.proposed_time = time(10, 0)
+        db.session.add(event)
+        db.session.commit()
+
+        request_clarification(event, coordinator["id"], "Please confirm the headcount.")
+        review_id = event.reviews[-1].id
+
+        with pytest.raises(PermissionError, match="Only the assigned Coordinator can delete a clarification request"):
+            delete_clarification_request(event, second_coordinator["id"], review_id)
+
+
+def test_delete_clarification_request_fails_for_unknown_review_id(app, event, coordinator):
+    with app.app_context():
+        event.proposed_date = date(2023, 12, 1)
+        event.proposed_time = time(10, 0)
+        db.session.add(event)
+        db.session.commit()
+
+        with pytest.raises(ValueError, match="No such clarification request"):
+            delete_clarification_request(event, coordinator["id"], 999999)
+
+
+def test_cannot_delete_an_already_withdrawn_clarification_request(app, event, coordinator):
+    with app.app_context():
+        event.proposed_date = date(2023, 12, 1)
+        event.proposed_time = time(10, 0)
+        db.session.add(event)
+        db.session.commit()
+
+        request_clarification(event, coordinator["id"], "Please confirm the headcount.")
+        review_id = event.reviews[-1].id
+        delete_clarification_request(event, coordinator["id"], review_id)
+
+        with pytest.raises(ValueError, match="already been deleted"):
+            delete_clarification_request(event, coordinator["id"], review_id)
+
+
+def test_cannot_delete_a_clarification_request_that_has_already_been_answered(app, event, coordinator, organiser):
+    with app.app_context():
+        event.proposed_date = date(2023, 12, 1)
+        event.proposed_time = time(10, 0)
+        db.session.add(event)
+        db.session.commit()
+
+        request_clarification(event, coordinator["id"], "Please confirm the headcount.")
+        review_id = event.reviews[-1].id
+        respond_to_clarification(event, organiser["id"], review_id, {"comments": "Confirmed at 120."})
+
+        with pytest.raises(ValueError, match="already been responded to"):
+            delete_clarification_request(event, coordinator["id"], review_id)
+
+
+def test_deleting_one_clarification_leaves_another_open_request_intact(app, event, coordinator):
+    with app.app_context():
+        event.proposed_date = date(2023, 12, 1)
+        event.proposed_time = time(10, 0)
+        db.session.add(event)
+        db.session.commit()
+
+        request_clarification(event, coordinator["id"], "First question.")
+        request_clarification(event, coordinator["id"], "Second question.")
+        first_id, second_id = [r.id for r in event.reviews if r.action == "clarification_requested"]
+
+        updated = delete_clarification_request(event, coordinator["id"], first_id)
+
+        # the second, still-open request keeps the flag set
+        assert updated.clarification_flag is True
+
+        thread = get_clarification_thread(updated)
+        first_entry = next(t for t in thread if t["reviewId"] == first_id)
+        second_entry = next(t for t in thread if t["reviewId"] == second_id)
+        assert first_entry["withdrawn"] is True
+        assert second_entry["withdrawn"] is False
+
+
+def test_get_clarification_thread_marks_withdrawn_requests(app, event, coordinator):
+    with app.app_context():
+        event.proposed_date = date(2023, 12, 1)
+        event.proposed_time = time(10, 0)
+        db.session.add(event)
+        db.session.commit()
+
+        request_clarification(event, coordinator["id"], "Please confirm the headcount.")
+        review_id = event.reviews[-1].id
+        delete_clarification_request(event, coordinator["id"], review_id)
+
+        thread = get_clarification_thread(event)
+        assert thread[0]["withdrawn"] is True
+        assert thread[0]["response"] is None
+
+
+# =======================================================================
+# Organiser cannot respond to a clarification once the event has reached
+# a terminal outcome (approved / rejected / cancelled)
+# =======================================================================
+
+@pytest.mark.parametrize("terminal_status", ["approved", "rejected", "cancelled"])
+def test_cannot_respond_to_clarification_once_event_is_in_a_terminal_status(
+    app, event, coordinator, organiser, terminal_status
+):
+    with app.app_context():
+        event.proposed_date = date(2023, 12, 1)
+        event.proposed_time = time(10, 0)
+        db.session.add(event)
+        db.session.commit()
+
+        request_clarification(event, coordinator["id"], "Please confirm the headcount.")
+        review_id = event.reviews[-1].id
+
+        event.status = terminal_status  # simulate the event having since been decided
+        db.session.commit()
+
+        with pytest.raises(ValueError, match=f"once the request has been {terminal_status}"):
+            respond_to_clarification(event, organiser["id"], review_id, {"comments": "Too late now."})
+
+
+def test_can_still_respond_while_status_is_submitted_or_under_review(app, event, coordinator, organiser):
+    with app.app_context():
+        event.proposed_date = date(2023, 12, 1)
+        event.proposed_time = time(10, 0)
+        db.session.add(event)
+        db.session.commit()
+
+        request_clarification(event, coordinator["id"], "Please confirm the headcount.")
+        review_id = event.reviews[-1].id
+
+        updated = respond_to_clarification(event, organiser["id"], review_id, {"comments": "Confirmed at 120."})
+        assert updated.clarification_flag is False
+
+
+# =======================================================================
+# Confirmation gate for approve / reject / cancel
+# (app.events.routes._require_confirmation is the actual decision logic
+# behind the HTTP 409 "please confirm" response; tested directly since
+# it needs no request/JWT context of its own — just an app context for
+# jsonify)
+# =======================================================================
+
+def test_require_confirmation_prompts_when_not_yet_confirmed(app, event):
+    with app.app_context():
+        event.clarification_flag = False
+        result = _require_confirmation(event, {}, "approve")
+        assert result is not None
+        response, status_code = result
+        assert status_code == 409
+        body = response.get_json()
+        assert body["requiresConfirmation"] is True
+        assert body["hasUnresolvedClarification"] is False
+        assert "approve" in body["message"]
+
+
+@pytest.mark.parametrize("action_label", ["approve", "reject", "cancel"])
+def test_require_confirmation_warns_about_unresolved_clarification(app, event, action_label):
+    with app.app_context():
+        event.clarification_flag = True
+        result = _require_confirmation(event, {}, action_label)
+        assert result is not None
+        response, status_code = result
+        body = response.get_json()
+        assert status_code == 409
+        assert body["hasUnresolvedClarification"] is True
+        assert "unresolved clarification" in body["message"].lower()
+        assert action_label in body["message"]
+
+
+def test_require_confirmation_returns_none_once_confirmed(app, event):
+    with app.app_context():
+        event.clarification_flag = True  # even with an unresolved clarification...
+        result = _require_confirmation(event, {"confirmed": True}, "reject")
+        assert result is None  # ...explicit confirmation always lets the action through
+
+
+def test_require_confirmation_is_required_even_without_any_unresolved_clarification(app, event):
+    with app.app_context():
+        event.clarification_flag = False
+        result = _require_confirmation(event, {}, "cancel")
+        assert result is not None  # confirmation is unconditional, not just a warning-triggered thing
