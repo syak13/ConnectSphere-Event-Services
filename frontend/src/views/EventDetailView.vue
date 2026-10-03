@@ -1,49 +1,15 @@
 <template>
   <div v-if="event">
-    <div v-if="openClarifications.length" class="notice">
+    <div v-if="isOwningOrganiser && canRespondToClarifications && openClarifications.length" class="notice">
       <strong>
         {{ openClarifications.length }} clarification request<span v-if="openClarifications.length > 1">s</span>
         awaiting your response.
       </strong>
     </div>
 
-    <h2>{{ event.name }}</h2>
-    <p>Status: <span class="badge" :class="event.status">{{ event.status }}</span></p>
-    <p>{{ event.description }}</p>
-    <p>Proposed: {{ event.proposedDate || "—" }} {{ event.proposedTime || "" }}</p>
-    <p>Expected attendance: {{ event.expectedAttendance || "—" }}</p>
-    <p>Requested by: {{ event.organiserName || "—" }}</p>
-    <p v-if="event.coordinatorId">Coordinator: {{ event.coordinatorName }}</p>
-
     <div v-if="!event.coordinatorId" class="notice">
       <strong>Unassigned.</strong> No Coordinator is currently assigned to this event.
     </div>
-
-    <section class="detail-block">
-      <h3>Venue Requirements</h3>
-      <ul>
-        <li>Capacity needed: {{ event.venueRequirements?.capacityNeeded ?? "—" }}</li>
-        <li>Required layout: {{ event.venueRequirements?.requiredLayout || "—" }}</li>
-        <li>Accessibility needs: {{ event.venueRequirements?.accessibilityNeeds || "—" }}</li>
-        <li v-if="event.venueRequirements?.requiredFacilities?.length">
-          Required facilities: {{ event.venueRequirements.requiredFacilities.join(", ") }}
-        </li>
-      </ul>
-    </section>
-
-    <section class="detail-block" v-if="event.equipmentRequirements?.length">
-      <h3>Equipment Requirements</h3>
-      <ul>
-        <li v-for="eq in event.equipmentRequirements" :key="eq.id">
-          {{ eq.quantity }}× {{ eq.type }}
-          <span v-if="eq.technicalNotes">— {{ eq.technicalNotes }}</span>
-          (<span class="badge" :class="eq.status">{{ eq.status }}</span>)
-        </li>
-      </ul>
-    </section>
-
-    <div v-if="event.clarificationFlag" class="notice">
-      <strong>Clarification requested:</strong> {{ event.clarificationComments }}
 
     <!-- Event summary -->
     <div class="card summary">
@@ -133,10 +99,6 @@
 
     </div>
 
-    <div v-if="event.status === 'rejected' && event.reviewDecision?.reason" class="notice error">
-      <strong>Rejection reason:</strong> {{ event.reviewDecision.reason }}
-    </div>
-
     <!-- Coordinator Assignment: visible to any Coordinator when the event has
          no assigned Coordinator yet. Still fully rule-based — the caller
          doesn't pick who it goes to, they just trigger the automatic retry
@@ -217,11 +179,8 @@
             <option v-for="c in otherCoordinators" :key="c.id" :value="c.id">{{ c.name }}</option>
           </select>
         </label>
-        <button :disabled="!newCoordinatorId" @click="reassign">Reassign (after offline agreement)</button>
-
-        <input v-model.number="newCoordinatorId" type="number" placeholder="New coordinator user ID" />
         <div class="actions">
-          <button class="btn btn-primary" @click="reassign">Reassign (after offline agreement)</button>
+          <button class="btn btn-primary" :disabled="!newCoordinatorId" @click="reassign">Reassign (after offline agreement)</button>
         </div>
 
       </div>
