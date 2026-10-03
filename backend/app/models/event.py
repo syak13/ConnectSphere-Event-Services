@@ -70,6 +70,11 @@ class Event(db.Model):
     )
 
     review_coordinator = db.relationship("User", foreign_keys=[review_coordinator_id])
+    # Added so list/detail views can show who requested and who's handling an
+    # event by name, instead of only a raw id (Coordinator Assignment AC:
+    # assigned-requests summary must show the requesting Organiser).
+    organiser = db.relationship("User", foreign_keys=[organiser_id])
+    coordinator = db.relationship("User", foreign_keys=[coordinator_id])
 
     clarification_responses = db.relationship(
         "EventClarificationResponse", backref="event", cascade="all, delete-orphan"
@@ -96,7 +101,9 @@ class Event(db.Model):
             "description": self.description,
             "category": self.category,
             "organiserId": self.organiser_id,
+            "organiserName": self.organiser.name if self.organiser else None,
             "coordinatorId": self.coordinator_id,
+            "coordinatorName": self.coordinator.name if self.coordinator else None,
             "status": self.status,
             "statusLabel": self.status_label,
             "statusValid": self.status_is_valid,

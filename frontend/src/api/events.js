@@ -21,4 +21,15 @@ export default {
   resubmitEvent: (id, payload) => apiClient.post(`/events/${id}/resubmit`, payload),
   reassign: (id, newCoordinatorId) => apiClient.post(`/events/${id}/reassign`, { newCoordinatorId }),
   changeStatus: (id, statusValue, reason) => apiClient.post(`/events/${id}/status`, { status: statusValue, reason }),
+
+  // Added: Coordinators view unassigned events for planning visibility (view-only, no claim/self-assign)
+  unassignedEvents: () => apiClient.get("/events/unassigned"),
+
+  // Added: Previous coordinator retains read-only visibility after reassignment
+  coordinatorCalendar: () => apiClient.get("/events/calendar"),
+
+  // Added: retries automatic assignment for an event submitted while no
+  // Coordinator was available. Still rule-based (get_next_coordinator
+  // decides) — this only triggers the retry, it doesn't let the caller pick.
+  autoAssign: (id) => apiClient.post(`/events/${id}/auto-assign`),
 };

@@ -1,5 +1,31 @@
 <template>
   <div>
+
+    <h2>Review Queue</h2>
+    <table v-if="events.length">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Status</th>
+          <th>Proposed Date/Time</th>
+          <th>Venue Reqs.</th>
+          <th>Organiser</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="e in events" :key="e.id">
+          <td>{{ e.name }}</td>
+          <td><span class="badge" :class="e.status">{{ e.status }}</span></td>
+          <td>{{ e.proposedDate || "—" }} {{ e.proposedTime || "" }}</td>
+          <td>{{ venueSummary(e) }}</td>
+          <td>{{ e.organiserName || "—" }}</td>
+          <td><router-link :to="`/events/${e.id}`">Review</router-link></td>
+        </tr>
+      </tbody>
+    </table>
+    <p v-else>No assigned requests.</p>
+
     <h2 class="page-title">Review Queue</h2>
 
     <div v-if="events.length" class="card">
@@ -32,6 +58,7 @@
     <div v-else class="card empty">
       <p>No assigned requests.</p>
     </div>
+
   </div>
 </template>
 
@@ -41,8 +68,16 @@ import eventsApi from "../api/events";
 
 const events = ref([]);
 
+
+function venueSummary(e) {
+  const v = e.venueRequirements;
+  if (!v || (!v.capacityNeeded && !v.requiredLayout)) return "—";
+  return [v.capacityNeeded ? `${v.capacityNeeded} pax` : null, v.requiredLayout].filter(Boolean).join(", ");
+}
+
 // "under_review" -> "under review"
 const statusLabel = (status) => (status || "").replace(/_/g, " ");
+
 
 onMounted(async () => {
   const { data } = await eventsApi.assignedEvents();

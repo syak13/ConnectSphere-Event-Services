@@ -459,6 +459,42 @@ def review_outcome(event_id):
 # Coordinator Assignment
 # ---------------------------------------------------------------------
 
+@events_bp.get("/unassigned")
+@roles_required("event_coordinator")
+def unassigned_events():
+    """Coordinators view events with no assigned Coordinator, for planning
+    visibility only — there is no self-assign step (Q&A #6/#13/#22)."""
+    events = assignment.list_unassigned_events()
+    return jsonify([e.to_dict() for e in events]), 200
+
+
+@events_bp.get("/calendar")
+@roles_required("event_coordinator")
+def coordinator_calendar_route():
+    """Coordinator's own calendar: events they currently own plus events
+    they previously coordinated before being reassigned off, the latter
+    flagged isReadOnly (Q&A #39)."""
+    user = _current_user()
+    return jsonify(assignment.coordinator_calendar(user.id)), 200
+
+
+@events_bp.post("/<int:event_id>/auto-assign")
+@roles_required("event_coordinator")
+def auto_assign_event(event_id):
+    """Lets any Coordinator trigger a retry of automatic assignment for an
+    event that was submitted while no Coordinator was available (still
+    rule-based via get_next_coordinator — not a manual pick or self-assign;
+    see assignment.try_assign_and_advance)."""
+    event = Event.query.get(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+    try:
+        event = assignment.try_assign_and_advance(event)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(event.to_dict()), 200
+
+
 @events_bp.post("/<int:event_id>/reassign")
 @roles_required("event_coordinator")
 def reassign_event(event_id):
