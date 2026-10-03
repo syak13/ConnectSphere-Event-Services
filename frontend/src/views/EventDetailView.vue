@@ -1,10 +1,28 @@
 <template>
   <div v-if="event">
+    <div v-if="openClarifications.length" class="notice">
+      <strong>
+        {{ openClarifications.length }} clarification request<span v-if="openClarifications.length > 1">s</span>
+        awaiting your response.
+      </strong>
+    </div>
     <!-- Event summary -->
     <div class="card summary">
       <div class="title-row">
         <h2 class="page-title">{{ event.name }}</h2>
         <span class="badge" :class="event.status">{{ statusLabel(event.status) }}</span>
+      </div>
+      <div v-if="event.reviewDecision?.outcome" class="notice" :class="event.reviewDecision.outcome">
+        <strong>
+          {{ event.reviewDecision.outcome === "approved" ? "Request approved" : "Request rejected" }}
+        </strong>
+        <p class="decision-meta">
+          By {{ event.reviewDecision.coordinatorName || `Coordinator #${event.reviewDecision.coordinatorId}` }}
+          on {{ formatDate(event.reviewDecision.timestamp) }}
+        </p>
+        <p v-if="event.reviewDecision.reason" class="decision-reason">
+          <strong>Reason:</strong> {{ event.reviewDecision.reason }}
+        </p>
       </div>
       <p class="description">{{ event.description }}</p>
       <div class="details">
@@ -38,12 +56,9 @@
       </div>
     </div>
 
-    <!-- <div v-if="openClarifications.length" class="notice">
-      <strong>
-        {{ openClarifications.length }} clarification request<span v-if="openClarifications.length > 1">s</span>
-        awaiting your response.
-      </strong>
-    </div> -->
+    <div>
+      <p></p>
+    </div>
 
     <div v-if="clarificationThread.length" class="card history">
       <h3 class="section-title">Clarification Thread</h3>
@@ -57,19 +72,25 @@
             </p>
           </div>
           <div v-if="item.response" class="thread-message response">
-            <span class="thread-meta">Organiser · {{ formatDate(item.response.createdAt) }}</span>
-            <p>{{ item.response.comments }}</p>
-            <p v-if="Object.keys(item.response.updatedFields || {}).length" class="thread-fields">
-              Updated: {{ formatFieldNames(Object.keys(item.response.updatedFields)) }}
-            </p>
-          </div>
-          <div v-else class="thread-pending">Awaiting organiser's response</div>
+              <span class="thread-meta">Organiser · {{ formatDate(item.response.createdAt) }}</span>
+              <p>{{ item.response.comments }}</p>
+              <p v-if="Object.keys(item.response.updatedFields || {}).length" class="thread-fields">
+                Updated: {{ formatFieldNames(Object.keys(item.response.updatedFields)) }}
+              </p>
+            </div>
+            <div v-else-if="item.withdrawn" class="thread-withdrawn">Withdrawn by coordinator</div>
+            <div v-else class="thread-pending">
+              <span>Awaiting organiser's response</span>
+              <button
+                v-if="isAssignedCoordinator"
+                class="btn btn-grey btn-small"
+                @click="deleteClarificationRequest(item.reviewId)"
+              >
+                Delete request
+              </button>
+            </div>
         </li>
       </ul>
-    </div>
-
-    <div v-if="event.status === 'rejected' && event.reviewDecision?.reason" class="notice error">
-      <strong>Rejection reason:</strong> {{ event.reviewDecision.reason }}
     </div>
 
     <!-- Coordinator Actions: Event Review and Approval + Coordinator Assignment + Event Status Management -->
@@ -103,7 +124,8 @@
     <button class="btn btn-rose" @click="reject">Reject</button>
     <button class="btn btn-grey" @click="reject">Reassign Coordinator</button>
   </div>
-</div>
+  <p v-if="actionError" class="field-error">{{ actionError }}</p>
+  </div>
 
       <div v-if="['approved', 'planning'].includes(event.status)" class="action-block">
         <div class="actions">
@@ -120,6 +142,16 @@
         </div>
       </div>
 
+      <div v-if="confirmState" class="confirm-overlay">
+        <div class="confirm-box">
+          <p>{{ confirmState.message }}</p>
+          <div class="actions">
+            <button class="btn btn-rose" @click="confirmState.onConfirm">Yes, continue</button>
+            <button class="btn btn-grey" @click="confirmState.onCancel">Cancel</button>
+          </div>
+        </div>
+      </div>
+
       <div class="action-block">
         <input v-model.number="newCoordinatorId" type="number" placeholder="New coordinator user ID" />
         <div class="actions">
@@ -129,7 +161,7 @@
     </section>
 
     <!-- Organiser Actions: Event Review and Approval -->
-    <section v-if="isOwningOrganiser">
+    <section v-if="isOwningOrganiser && canRespondToClarifications">
       <template v-if="openClarifications.length">
         <h3 class="section-title">Clarification Requests Awaiting Your Response</h3>
         <div v-for="item in openClarifications" :key="item.reviewId" class="action-block">
@@ -206,6 +238,9 @@ const newCoordinatorId = ref(null);
 const clarificationError = ref("");
 const reviewHistory = ref([]);
 
+const confirmState = ref(null); // { message, onConfirm, onCancel }
+const actionError = ref("");
+
 const EDITABLE_FIELD_OPTIONS = [
   { key: "name", label: "Event name", type: "text" },
   { key: "purpose", label: "Purpose", type: "text" },
@@ -235,8 +270,12 @@ const clarificationThread = ref([]);
 const openResponseForms = reactive({}); // keyed by reviewId -> { comments, fields }
 const respondErrors = reactive({});     // keyed by reviewId -> error string
 
+const canRespondToClarifications = computed(
+  () => !["approved", "rejected", "cancelled"].includes(event.value?.status)
+);
+
 const openClarifications = computed(() =>
-  clarificationThread.value.filter((item) => item.response === null)
+  clarificationThread.value.filter((item) => item.response === null && !item.withdrawn)
 );
 
 const formatFieldNames = (keys) =>
@@ -293,6 +332,32 @@ function ensureResponseForm(item) {
   openResponseForms[item.reviewId] = { comments: "", fields };
 }
 
+function requestActionWithConfirmation(callWithConfirmed) {
+  return new Promise((resolve, reject) => {
+    callWithConfirmed(false)
+      .then(({ data }) => resolve(data))
+      .catch((e) => {
+        if (e.response?.status === 409 && e.response.data?.requiresConfirmation) {
+          confirmState.value = {
+            message: e.response.data.message,
+            onConfirm: () => {
+              confirmState.value = null;
+              callWithConfirmed(true)
+                .then(({ data }) => resolve(data))
+                .catch(reject);
+            },
+            onCancel: () => {
+              confirmState.value = null;
+              resolve(null);
+            },
+          };
+        } else {
+          reject(e);
+        }
+      });
+  });
+}
+
 async function respondToItem(reviewId) {
   respondErrors[reviewId] = "";
   const form = openResponseForms[reviewId];
@@ -311,24 +376,66 @@ async function respondToItem(reviewId) {
 }
 
 async function approve() {
-  await eventsApi.approveEvent(event.value.id, comment.value);
-  comment.value = "";
-  await load();
+  actionError.value = "";
+  try {
+    const data = await requestActionWithConfirmation((confirmed) =>
+      eventsApi.approveEvent(event.value.id, comment.value, confirmed)
+    );
+    if (data) {
+      comment.value = "";
+      await load();
+    }
+  } catch (e) {
+    actionError.value = e.response?.data?.error || "Could not approve this request.";
+  }
 }
+
 async function reject() {
-  await eventsApi.rejectEvent(event.value.id, comment.value);
-  comment.value = "";
-  await load();
+  actionError.value = "";
+  try {
+    const data = await requestActionWithConfirmation((confirmed) =>
+      eventsApi.rejectEvent(event.value.id, comment.value, confirmed)
+    );
+    if (data) {
+      comment.value = "";
+      await load();
+    }
+  } catch (e) {
+    actionError.value = e.response?.data?.error || "Could not reject this request.";
+  }
 }
+
 async function cancelEvent() {
-  await eventsApi.changeStatus(event.value.id, "cancelled", comment.value);
-  await load();
+  actionError.value = "";
+  try {
+    const data = await requestActionWithConfirmation((confirmed) =>
+      eventsApi.cancelEvent(event.value.id, comment.value, confirmed)
+    );
+    if (data) {
+      comment.value = "";
+      await load();
+    }
+  } catch (e) {
+    actionError.value = e.response?.data?.error || "Could not cancel this event.";
+  }
 }
+
+async function deleteClarificationRequest(reviewId) {
+  actionError.value = "";
+  try {
+    await eventsApi.deleteClarification(event.value.id, reviewId);
+    await load();
+  } catch (e) {
+    actionError.value = e.response?.data?.error || "Could not delete this clarification request.";
+  }
+}
+
 async function revertToPlanning() {
   await eventsApi.changeStatus(event.value.id, "planning", comment.value);
   comment.value = "";
   await load();
 }
+
 async function reassign() {
   if (!newCoordinatorId.value) return;
   await eventsApi.reassign(event.value.id, newCoordinatorId.value);
@@ -500,6 +607,70 @@ onMounted(load);
   font-size: 0.85rem;
   color: var(--text-muted, #6b6890);
 }
+
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.confirm-box {
+  background: #fff;
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.thread-withdrawn {
+  margin-left: 1rem;
+  font-size: 0.85rem;
+  font-style: italic;
+  color: var(--text-muted, #6b6890);
+}
+
+.thread-pending {
+  margin-left: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-muted, #6b6890);
+}
+
+.btn-small {
+  padding: 0.2rem 0.6rem;
+  font-size: 0.8rem;
+}
+
+.notice.approved {
+  background: var(--mint-bg, #d3f5e3);
+  color: var(--mint-text, #1e6b47);
+}
+
+.notice.rejected {
+  background: var(--rose-bg, #fbdcdc);
+  color: var(--rose-text, #a12b47);
+}
+
+.decision-meta {
+  margin: 0.25rem 0 0;
+  font-size: 0.85rem;
+  font-weight: 400;
+  opacity: 0.85;
+}
+
+.decision-reason {
+  margin: 0.35rem 0 0;
+  font-weight: 400;
+}
+
 /* Summary card */
 .card {
   padding: 1.25rem 1.5rem;

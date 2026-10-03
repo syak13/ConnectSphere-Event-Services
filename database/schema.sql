@@ -95,8 +95,6 @@ CREATE TABLE events (
     clarification_flag      TINYINT(1) NOT NULL DEFAULT 0,   -- sub-state of under_review
     clarification_comments  TEXT NULL,
 
-    clarification_flag      TINYINT(1) NOT NULL DEFAULT 0,   -- sub-state of under_review
-    clarification_comments  TEXT NULL,
     
     -- reviewDecision snapshot (latest decision; full history in event_reviews)
     review_outcome          ENUM('approved','rejected','returned') NULL,
@@ -148,6 +146,7 @@ CREATE TABLE event_reviews (
     action          ENUM('clarification_requested','approved','rejected','returned') NOT NULL,
     comments        TEXT NULL,
     editable_fields JSON NULL,  -- fields the Organiser may edit when responding to THIS specific request
+    withdrawn_at    DATETIME NULL,        -- set when the Coordinator deletes/withdraws this request
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_er_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
     CONSTRAINT fk_er_coordinator FOREIGN KEY (coordinator_id) REFERENCES users(id),

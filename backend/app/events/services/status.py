@@ -12,14 +12,14 @@ from app.models.event import Event, EventStatusHistory
 
 ALLOWED_TRANSITIONS = {
     "draft": {"submitted"},
-    "submitted": {"under_review"},
-    "under_review": {"approved", "rejected"},
+    "submitted": {"under_review", "approved", "rejected", "cancelled"},
+    "under_review": {"approved", "rejected", "cancelled"},
     "approved": {"planning", "cancelled"},
     "planning": {"confirmed", "cancelled"},
     "confirmed": {"planning", "completed", "cancelled"},
     "completed": set(),
     "cancelled": set(),
-    "rejected": set(),  # resubmission creates a new record instead of reopening this one
+    "rejected": set(),
 }
 
 

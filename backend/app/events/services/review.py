@@ -9,9 +9,9 @@ Event Review and Approval
   status enum rule: rejected -> new submitted record on resubmission)
 - Organiser views review outcome and comments (routes.py)
 """
-from datetime import datetime
+
 from app.common.time import utcnow
-import re
+from app.common.text_validation import validate_descriptive_text
 
 from app.extensions import db
 from app.events.services.assignment import assign_coordinator
@@ -21,7 +21,13 @@ from app.models.event import Event, EventClarificationResponse, EventReview
 from app.events.services.validators import validate_for_submission
 from sqlalchemy.exc import IntegrityError
 
-_COMMENT_CONTAINS_WORD = re.compile(r"[A-Za-z]")
+REQUIRED_FOR_SUBMISSION = ["name", "purpose", "description", "proposed_date", "expected_attendance"]
+REVIEWABLE_STATUSES = ("submitted", "under_review")
+
+# Once an event reaches any of these, the Organiser can no longer respond
+# to an outstanding clarification (the event is no longer actively "in
+# review" in any sense that a field edit could still matter).
+TERMINAL_STATUSES_BLOCKING_RESPONSE = ("approved", "rejected", "cancelled")
 
 def submit_event(event: Event, organiser_id: int) -> Event:
     if event.organiser_id != organiser_id:
@@ -48,10 +54,7 @@ def request_clarification(event: Event, coordinator_id: int, comments: str, edit
         raise PermissionError("Only the assigned Coordinator can request clarification")
     if event.status != "under_review":
         raise ValueError("Clarification can only be requested while a request is under review")
-    if not comments or not comments.strip():
-        raise ValueError("At least one clarification comment is required")
-    if not _COMMENT_CONTAINS_WORD.search(comments):
-        raise ValueError("Clarification comments must contain descriptive text, not just symbols or numbers")
+    validate_descriptive_text(comments, "clarification comment")
 
     from app.events.services.drafts import CLARIFICATION_EDITABLE_FIELD_CHOICES  # local import avoids circular import
 
@@ -81,6 +84,8 @@ def request_clarification(event: Event, coordinator_id: int, comments: str, edit
 def respond_to_clarification(event: Event, organiser_id: int, review_id: int, data: dict) -> Event:
     if event.organiser_id != organiser_id:
         raise PermissionError("Only the requesting Organiser can respond")
+    if event.status in TERMINAL_STATUSES_BLOCKING_RESPONSE:
+        raise ValueError(f"Cannot respond to a clarification once the request has been {event.status}")
 
     target_review = next(
         (r for r in event.reviews if r.id == review_id and r.action == "clarification_requested"),
@@ -88,20 +93,18 @@ def respond_to_clarification(event: Event, organiser_id: int, review_id: int, da
     )
     if target_review is None:
         raise ValueError("No such clarification request for this event")
-
+    if target_review.withdrawn_at is not None:
+        raise ValueError("This clarification request has been withdrawn and no longer needs a response")
     if EventClarificationResponse.query.filter_by(review_id=review_id).first():
         raise ValueError("This clarification has already been responded to")
 
     comments = data.get("comments", "")
-    if not comments or not comments.strip():
-        raise ValueError("At least one response comment is required")
-    if not _COMMENT_CONTAINS_WORD.search(comments):
-        raise ValueError("Response comments must contain descriptive text, not just symbols or numbers")
+    validate_descriptive_text(comments, "response comment")
 
     allowed_fields = target_review.editable_fields or []
     restricted_data = {k: v for k, v in data.items() if k in allowed_fields}
 
-    from app.events.services.drafts import _apply_fields  # local import avoids circular import
+    from app.events.services.drafts import _apply_fields
 
     _apply_fields(event, restricted_data)
 
@@ -115,13 +118,7 @@ def respond_to_clarification(event: Event, organiser_id: int, review_id: int, da
         )
     )
 
-    answered_review_ids = {
-        r.review_id for r in EventClarificationResponse.query.filter_by(event_id=event.id).all()
-    }
-    answered_review_ids.add(review_id)
-    event.clarification_flag = any(
-        r.action == "clarification_requested" and r.id not in answered_review_ids for r in event.reviews
-    )
+    event.clarification_flag = _has_open_clarification(event, newly_resolved_review_id=review_id)
 
     try:
         db.session.commit()
@@ -131,6 +128,47 @@ def respond_to_clarification(event: Event, organiser_id: int, review_id: int, da
 
     return event
 
+def delete_clarification_request(event: Event, coordinator_id: int, review_id: int) -> Event:
+    """The Coordinator withdraws a clarification request they no longer
+    need answered. Implemented as a soft delete (withdrawn_at) rather than
+    removing the row, so the audit trail still shows it was asked and
+    later withdrawn. Only an unanswered request can be withdrawn — once
+    responded to, it's part of the permanent review history."""
+    if event.coordinator_id != coordinator_id:
+        raise PermissionError("Only the assigned Coordinator can delete a clarification request")
+
+    target_review = next(
+        (r for r in event.reviews if r.id == review_id and r.action == "clarification_requested"),
+        None,
+    )
+    if target_review is None:
+        raise ValueError("No such clarification request for this event")
+    if target_review.withdrawn_at is not None:
+        raise ValueError("This clarification request has already been deleted")
+    if EventClarificationResponse.query.filter_by(review_id=review_id).first():
+        raise ValueError("Cannot delete a clarification request that has already been responded to")
+
+    target_review.withdrawn_at = utcnow()
+    event.clarification_flag = _has_open_clarification(event, exclude_review_id=review_id)
+    if not event.clarification_flag:
+        event.clarification_comments = None
+
+    db.session.commit()
+    return event
+
+def _has_open_clarification(event: Event, exclude_review_id: int = None, newly_resolved_review_id: int = None) -> bool:
+    """True if at least one clarification request is still awaiting a
+    response — i.e. not withdrawn and not yet answered."""
+    answered_ids = {r.review_id for r in event.clarification_responses}
+    if newly_resolved_review_id is not None:
+        answered_ids.add(newly_resolved_review_id)
+    return any(
+        r.action == "clarification_requested"
+        and r.withdrawn_at is None
+        and r.id != exclude_review_id
+        and r.id not in answered_ids
+        for r in event.reviews
+    )
 
 def approve_event(event: Event, coordinator_id: int, comments: str = None) -> Event:
     if event.coordinator_id != coordinator_id:
@@ -152,10 +190,9 @@ def approve_event(event: Event, coordinator_id: int, comments: str = None) -> Ev
 def reject_event(event: Event, coordinator_id: int, reason: str) -> Event:
     if event.coordinator_id != coordinator_id:
         raise PermissionError("Only the assigned Coordinator can reject this request")
-    if event.status != "under_review":
+    if event.status not in REVIEWABLE_STATUSES:
         raise ValueError("Only a request under review can be rejected")
-    if not reason:
-        raise ValueError("A reason is required to reject a request")
+    validate_descriptive_text(reason, "rejection reason")
 
     event.review_outcome = "rejected"
     event.review_reason = reason
@@ -204,10 +241,6 @@ def resubmit_rejected_event(original: Event, organiser_id: int, data: dict) -> E
     return submit_event(new_event, organiser_id)
 
 def get_clarification_thread(event: Event) -> list:
-    """Every clarification request paired with its response (or None if
-    still awaiting one), in chronological order. Each request carries the
-    specific fields the Coordinator opened up for THAT request, so several
-    can be open at once and answered independently."""
     responses_by_review = {r.review_id: r for r in event.clarification_responses}
     thread = []
     for entry in event.reviews:
@@ -224,6 +257,7 @@ def get_clarification_thread(event: Event) -> list:
                     "createdAt": entry.created_at.isoformat() if entry.created_at else None,
                 },
                 "response": response.to_dict() if response else None,
+                "withdrawn": entry.withdrawn_at is not None,
             }
         )
     return thread
