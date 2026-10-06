@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime, time
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -7,7 +7,8 @@ from app.auth.decorators import roles_required
 from app.models.event import Event
 from app.models.user import User
 from app.models.venue import Venue, VenueBooking
-from app.venues.services import availability, booking, catalogue, search, suitability
+from app.venues.services import availability, booking, booking_requests, catalogue, search, suitability
+from app.venues.services.booking_requests import BookingRequestError
 
 venues_bp = Blueprint("venues", __name__)
 
@@ -183,22 +184,90 @@ def check_suitability(venue_id, event_id):
 # Venue Booking Request / Venue Booking Approval / Booking Conflict Detection
 # ---------------------------------------------------------------------
 
+_DATE_TIME_FIELDS = (
+    # (json key, parsed key, parser, human label)
+    ("date", "date", date.fromisoformat, "event date"),
+    ("endDate", "end_date", date.fromisoformat, "end date"),
+    ("startTime", "start_time", time.fromisoformat, "start time"),
+    ("endTime", "end_time", time.fromisoformat, "end time"),
+)
+ 
+ 
+def _parse_venue_request(raw, index):
+    """Turn one venue's JSON into the dict the service expects.
+    Returns (parsed, errors); errors are for values that are present but
+    not valid ISO dates/times (missing values are reported by the service)."""
+    if not isinstance(raw, dict):
+        return {}, [{
+            "venue_id": None,
+            "venue": f"Venue {index}",
+            "field": "venue",
+            "message": f"Venue {index}: invalid venue entry",
+        }]
+ 
+    parsed = {
+    "venue_id": raw.get("venueId"),
+    }
+    
+    errors = []
+    for json_key, field, parser, label in _DATE_TIME_FIELDS:
+        value = raw.get(json_key)
+        if value in (None, ""):
+            parsed[field] = None
+            continue
+        try:
+            parsed[field] = parser(value)
+        except (ValueError, TypeError):
+            parsed[field] = None
+            errors.append({
+                "venue_id": raw.get("venueId"),
+                "venue": f"Venue {index}",
+                "field": field,
+                "message": f"Venue {index}: {label} is not a valid value",
+            })
+    return parsed, errors
+
 @venues_bp.post("/bookings")
 @roles_required("event_coordinator")
 def submit_booking():
+    """One request, one or more venues, each with its own timing/requirements.
+ 
+    Body:
+    {
+      "eventId": 5,
+      "venues": [
+        {"venueId": 10, "date": "2026-11-01", "startTime": "20:00",
+         "endTime": "02:00", "endDate": "2026-11-02",
+         "label": "Main hall", "equipment": "Projector",
+         "catering": null, "otherRequirements": null}
+      ]
+    }
+    """
     user = _current_user()
     data = request.get_json() or {}
     event = Event.query.get(data.get("eventId"))
-    venue = catalogue.get_venue(data.get("venueId"))
-    if not event or not venue:
-        return jsonify({"error": "Event or venue not found"}), 404
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
     if event.coordinator_id != user.id:
         return jsonify({"error": "Only the assigned Coordinator can request a venue for this event"}), 403
+ 
+    raw_venues = data.get("venues")
+    if not isinstance(raw_venues, list):
+        raw_venues = []
+ 
+    venue_requests, parse_errors = [], []
+    for index, raw in enumerate(raw_venues, start=1):
+        parsed, errors = _parse_venue_request(raw, index)
+        venue_requests.append(parsed)
+        parse_errors.extend(errors)
+    if parse_errors:
+        return jsonify({"error": "Booking request could not be submitted", "errors": parse_errors}), 400
+ 
     try:
-        result = booking.submit_booking_request(event, venue, user.id, label=data.get("label"))
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    return jsonify(result.to_dict()), 201
+        results = booking_requests.submit_booking_requests(event, venue_requests, user.id)
+    except BookingRequestError as e:
+        return jsonify({"error": "Booking request could not be submitted", "errors": e.errors}), 400
+    return jsonify([b.to_dict() for b in results]), 201
 
 
 @venues_bp.get("/events/<int:event_id>/bookings")
