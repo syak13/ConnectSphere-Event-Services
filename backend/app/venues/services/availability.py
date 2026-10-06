@@ -3,8 +3,12 @@
 Week 7 change #1 (Venue Setup and Turnaround Time): a venue's effective
 busy window is no longer just the event's advertised start/end -- it is
 padded by the venue's setup_minutes before and turnaround_minutes after.
-compute_effective_window() is the single source of truth for this and is
+compute_booking_window() is the single source of truth for this and is
 reused by booking.py's conflict detection so the two can never drift apart.
+
+Per-venue timing: each VenueBooking now carries its own start_at/end_at, so
+compute_booking_window() uses those. Older bookings that have no start_at/end_at
+fall back to the event's advertised 2-hour slot (compute_effective_window).
 """
 from datetime import datetime, timedelta
 
@@ -14,16 +18,38 @@ from app.models.venue import Venue, VenueAvailabilityFlag, VenueBooking, VenueUn
 CONFIRMED = "confirmed"
 
 
+def _pad_window(start, end, venue: Venue):
+    """Pad a start/end by the venue's setup and turnaround time."""
+    effective_start = start - timedelta(minutes=venue.setup_minutes or 0)
+    effective_end = end + timedelta(minutes=venue.turnaround_minutes or 0)
+    return effective_start, effective_end
+
+
 def compute_effective_window(event, venue: Venue):
-    """An event's effective busy window on a given venue: its advertised
-    2-hour slot, padded by that venue's setup/turnaround time. E.g. a venue
-    with 30 min setup / 45 min turnaround on a 10:00-12:00 event occupies
-    the venue from 9:30 to 12:45 (matches the Week 7 PDF's own example)."""
+    """Legacy window: an event's advertised 2-hour slot, padded by that
+    venue's setup/turnaround time. E.g. a venue with 30 min setup / 45 min
+    turnaround on a 10:00-12:00 event occupies the venue from 9:30 to 12:45
+    (matches the Week 7 PDF's own example). Used for bookings that have no
+    start_at/end_at of their own."""
     advertised_start = datetime.combine(event.proposed_date, event.proposed_time or datetime.min.time())
     advertised_end = advertised_start + timedelta(hours=2)
-    effective_start = advertised_start - timedelta(minutes=venue.setup_minutes or 0)
-    effective_end = advertised_end + timedelta(minutes=venue.turnaround_minutes or 0)
-    return effective_start, effective_end
+    return _pad_window(advertised_start, advertised_end, venue)
+
+
+def compute_booking_window(booking, venue: Venue):
+    """Effective busy window of one booking on its venue, or None if the
+    booking has no usable timing.
+
+    Uses the booking's own start_at/end_at (which may run past midnight into
+    the next day). Falls back to the event's advertised slot for older
+    bookings that were created before per-venue timing existed."""
+    if booking.start_at and booking.end_at:
+        return _pad_window(booking.start_at, booking.end_at, venue)
+
+    event = booking.event
+    if not event or not event.proposed_date:
+        return None
+    return compute_effective_window(event, venue)
 
 
 def get_calendar(venue_id: int, start, end):
@@ -40,10 +66,10 @@ def get_calendar(venue_id: int, start, end):
     booking_dicts = []
     for b in bookings:
         entry = b.to_dict()
-        if venue and b.event and b.event.proposed_date:
-            eff_start, eff_end = compute_effective_window(b.event, venue)
-            entry["effectiveStart"] = eff_start.isoformat()
-            entry["effectiveEnd"] = eff_end.isoformat()
+        window = compute_booking_window(b, venue) if venue else None
+        if window:
+            entry["effectiveStart"] = window[0].isoformat()
+            entry["effectiveEnd"] = window[1].isoformat()
         booking_dicts.append(entry)
 
     blocks = VenueUnavailability.query.filter(
@@ -85,9 +111,10 @@ def _flag_affected_events(venue: Venue, start, end, reason: str):
     flagged = []
     for booking in confirmed:
         event = booking.event
-        if not event or not event.proposed_date:
+        window = compute_booking_window(booking, venue)
+        if not event or window is None:
             continue
-        event_start, event_end = compute_effective_window(event, venue)
+        event_start, event_end = window
         if event_start < end and start < event_end:
             flag = VenueAvailabilityFlag(
                 event_id=event.id,
@@ -113,10 +140,10 @@ def flag_timing_conflicts(venue: Venue, reason: str):
     windows = []
     for b in bookings:
         event = b.event
-        if not event or not event.proposed_date:
+        window = compute_booking_window(b, venue)
+        if not event or window is None:
             continue
-        start, end = compute_effective_window(event, venue)
-        windows.append((event, start, end))
+        windows.append((event, window[0], window[1]))
 
     flagged_event_ids = set()
     flags = []
