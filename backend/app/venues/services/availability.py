@@ -1,0 +1,178 @@
+"""Venue Availability Calendar epic.
+
+Week 7 change #1 (Venue Setup and Turnaround Time): a venue's effective
+busy window is no longer just the event's advertised start/end -- it is
+padded by the venue's setup_minutes before and turnaround_minutes after.
+compute_effective_window() is the single source of truth for this and is
+reused by booking.py's conflict detection so the two can never drift apart.
+"""
+from datetime import datetime, timedelta
+
+from app.extensions import db
+from app.models.venue import Venue, VenueAvailabilityFlag, VenueBooking, VenueUnavailability
+
+CONFIRMED = "confirmed"
+
+
+def compute_effective_window(event, venue: Venue):
+    """An event's effective busy window on a given venue: its advertised
+    2-hour slot, padded by that venue's setup/turnaround time. E.g. a venue
+    with 30 min setup / 45 min turnaround on a 10:00-12:00 event occupies
+    the venue from 9:30 to 12:45 (matches the Week 7 PDF's own example)."""
+    advertised_start = datetime.combine(event.proposed_date, event.proposed_time or datetime.min.time())
+    advertised_end = advertised_start + timedelta(hours=2)
+    effective_start = advertised_start - timedelta(minutes=venue.setup_minutes or 0)
+    effective_end = advertised_end + timedelta(minutes=venue.turnaround_minutes or 0)
+    return effective_start, effective_end
+
+
+def get_calendar(venue_id: int, start, end):
+    """View venue availability: confirmed bookings and recorded
+    unavailability for one venue within [start, end]. Each booking entry
+    includes its effective (setup/turnaround-padded) window alongside the
+    raw record, so the frontend can render either."""
+    venue = Venue.query.get(venue_id)
+
+    bookings = VenueBooking.query.filter(
+        VenueBooking.venue_id == venue_id,
+        VenueBooking.status == CONFIRMED,
+    ).all()
+    booking_dicts = []
+    for b in bookings:
+        entry = b.to_dict()
+        if venue and b.event and b.event.proposed_date:
+            eff_start, eff_end = compute_effective_window(b.event, venue)
+            entry["effectiveStart"] = eff_start.isoformat()
+            entry["effectiveEnd"] = eff_end.isoformat()
+        booking_dicts.append(entry)
+
+    blocks = VenueUnavailability.query.filter(
+        VenueUnavailability.venue_id == venue_id,
+        VenueUnavailability.end_datetime >= start,
+        VenueUnavailability.start_datetime <= end,
+    ).all()
+    return {
+        "confirmedBookings": booking_dicts,
+        "unavailability": [u.to_dict() for u in blocks],
+    }
+
+
+def get_combined_calendar(start, end):
+    """Combined view: every active venue's calendar in one call, so the
+    frontend can render a single toggle between 'combined' and 'per-venue'
+    without making N separate requests."""
+    venues = Venue.query.filter_by(is_active=True).all()
+    return [
+        {
+            "venue": v.to_dict(),
+            **get_calendar(v.id, start, end),
+        }
+        for v in venues
+    ]
+
+
+def _flag_affected_events(venue: Venue, start, end, reason: str):
+    """Flag availability changes affecting an upcoming event: any CONFIRMED
+    booking on this venue whose effective (setup/turnaround-padded) window
+    overlaps the new unavailable period gets a flag so the Coordinator can
+    follow up. Per Week 7 change #2, the event itself is never cancelled
+    here -- only flagged."""
+    confirmed = VenueBooking.query.filter(
+        VenueBooking.venue_id == venue.id,
+        VenueBooking.status == CONFIRMED,
+    ).all()
+
+    flagged = []
+    for booking in confirmed:
+        event = booking.event
+        if not event or not event.proposed_date:
+            continue
+        event_start, event_end = compute_effective_window(event, venue)
+        if event_start < end and start < event_end:
+            flag = VenueAvailabilityFlag(
+                event_id=event.id,
+                venue_id=venue.id,
+                reason=reason or "Venue marked unavailable during this event's scheduled time",
+            )
+            db.session.add(flag)
+            flagged.append(flag)
+    return flagged
+
+
+def flag_timing_conflicts(venue: Venue, reason: str):
+    """Week 7 change #1: when a venue's setup_minutes/turnaround_minutes
+    changes, two previously non-conflicting confirmed bookings can now
+    effectively overlap. Re-check every pair of this venue's confirmed
+    bookings under the new timing and flag any event involved in a new
+    overlap, rather than silently leaving (or removing) the conflict."""
+    bookings = VenueBooking.query.filter(
+        VenueBooking.venue_id == venue.id,
+        VenueBooking.status == CONFIRMED,
+    ).all()
+
+    windows = []
+    for b in bookings:
+        event = b.event
+        if not event or not event.proposed_date:
+            continue
+        start, end = compute_effective_window(event, venue)
+        windows.append((event, start, end))
+
+    flagged_event_ids = set()
+    flags = []
+    for i in range(len(windows)):
+        event_a, start_a, end_a = windows[i]
+        for j in range(i + 1, len(windows)):
+            event_b, start_b, end_b = windows[j]
+            if start_a < end_b and start_b < end_a:
+                for ev in (event_a, event_b):
+                    if ev.id not in flagged_event_ids:
+                        flagged_event_ids.add(ev.id)
+                        flag = VenueAvailabilityFlag(event_id=ev.id, venue_id=venue.id, reason=reason)
+                        db.session.add(flag)
+                        flags.append(flag)
+    return flags
+
+
+def add_unavailability(venue: Venue, user_id: int, start, end, reason: str = None):
+    """Venue Staff mark a venue unavailable for operational reasons.
+    Returns (block, flags_raised) -- flags_raised is non-empty when this
+    block collides with an already-confirmed booking's effective window."""
+    if end <= start:
+        raise ValueError("End time must be after start time")
+
+    block = VenueUnavailability(
+        venue_id=venue.id, start_datetime=start, end_datetime=end, reason=reason, created_by=user_id
+    )
+    db.session.add(block)
+
+    flags = _flag_affected_events(venue, start, end, reason)
+
+    db.session.commit()
+    return block, flags
+
+
+def list_flags_for_event(event_id: int):
+    return VenueAvailabilityFlag.query.filter_by(event_id=event_id).order_by(
+        VenueAvailabilityFlag.created_at.desc()
+    ).all()
+
+
+def list_unresolved_flags_for_coordinator(coordinator_id: int):
+    from app.models.event import Event
+
+    return (
+        VenueAvailabilityFlag.query.join(Event, VenueAvailabilityFlag.event_id == Event.id)
+        .filter(Event.coordinator_id == coordinator_id, VenueAvailabilityFlag.resolved.is_(False))
+        .order_by(VenueAvailabilityFlag.created_at.desc())
+        .all()
+    )
+
+
+def resolve_flag(flag: VenueAvailabilityFlag):
+    from app.common.time import utcnow
+
+    flag.resolved = True
+    flag.resolved_at = utcnow()
+    db.session.commit()
+    return flag
