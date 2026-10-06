@@ -8,6 +8,7 @@
         <router-link v-if="auth.hasRole('event_coordinator')" to="/review">Review Queue</router-link>
         <router-link v-if="auth.hasRole('event_coordinator')" to="/planning">Planning View</router-link>
         <router-link v-if="auth.hasRole('event_coordinator')" to="/calendar">My Calendar</router-link>
+        <router-link v-if="auth.hasRole('event_coordinator')" to="/venues/search">Venue Search</router-link>
         <span class="spacer" />
         <span class="user-name">{{ auth.user?.name }}</span>
         <button class="logout" @click="handleLogout">Logout</button>

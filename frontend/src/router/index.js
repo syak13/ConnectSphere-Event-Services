@@ -9,6 +9,7 @@ import ReviewQueueView from "../views/ReviewQueueView.vue";
 import EventDetailView from "../views/EventDetailView.vue";
 import PlanningView from "../views/PlanningView.vue";
 import CoordinatorCalendar from "../components/CoordinatorCalendar.vue";
+import VenueSearchView from "../views/VenueSearchView.vue";
 
 
 const routes = [
@@ -23,6 +24,7 @@ const routes = [
   { path: "/planning", name: "planning", component: PlanningView, meta: { requiresAuth: true } },
   // Added: previous coordinator retains read-only visibility after reassignment
   { path: "/calendar", name: "calendar", component: CoordinatorCalendar, meta: { requiresAuth: true } },
+  { path: "/venues/search", name: "venue-search", component: VenueSearchView, meta: { requiresAuth: true, roles: ["event_coordinator"] } },
 
 
   {
