@@ -6,6 +6,13 @@ from app.common.time import utcnow
 from app.extensions import db
 
 NOT_SPECIFIED = "not specified"
+# Single source of truth for venue booking statuses (must match the ENUM in
+# database/schema.sql). Only APPROVED bookings block a venue.
+BOOKING_PENDING = "pending"
+BOOKING_APPROVED = "approved"
+BOOKING_REJECTED = "rejected"
+BOOKING_WITHDRAWN = "withdrawn"
+ACTIVE_BOOKING_STATUSES = (BOOKING_PENDING, BOOKING_APPROVED)
 
 class Venue(db.Model):
     __tablename__ = "venues"
