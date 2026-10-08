@@ -14,21 +14,16 @@ checked booking-against-booking, not event-against-event.
 from app.common.time import utcnow
 from app.extensions import db
 from app.models.event import Event
-from app.models.venue import Venue, VenueBooking
-from app.venues.services.availability import compute_booking_window
-
-
-PENDING = "pending"
-APPROVED = "approved"
-REJECTED = "rejected"
-WITHDRAWN = "withdrawn"
-
-# A pending or approved booking counts as an active request
-# for the same event and venue.
-ACTIVE_STATUSES = (
-    PENDING,
-    APPROVED,
+from app.models.venue import (
+    ACTIVE_BOOKING_STATUSES as ACTIVE_STATUSES,
+    BOOKING_APPROVED as APPROVED,
+    BOOKING_PENDING as PENDING,
+    BOOKING_REJECTED as REJECTED,
+    BOOKING_WITHDRAWN as WITHDRAWN,
+    Venue,
+    VenueBooking,
 )
+from app.venues.services.availability import compute_booking_window
 
 
 def submit_booking_request(

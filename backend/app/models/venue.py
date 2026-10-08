@@ -24,6 +24,9 @@ class Venue(db.Model):
 
     accessibility_info = db.Column(db.Text, nullable=True)
     operating_hours = db.Column(db.String(255), nullable=True)
+    # Week 7 change #1: minutes the venue is occupied before / after an event
+    setup_minutes = db.Column(db.Integer, nullable=False, default=0)
+    turnaround_minutes = db.Column(db.Integer, nullable=False, default=0)
 
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=utcnow)
@@ -55,7 +58,7 @@ class Venue(db.Model):
 class VenueUnavailability(db.Model):
     """Venue Staff blocking a venue for maintenance, renovation, etc.
     (Venue Availability Calendar epic)."""
-    __tablename__ = "venue_unavailabilities"
+    __tablename__ = "venue_unavailability"
 
     id = db.Column(db.BigInteger, primary_key=True)
     venue_id = db.Column(db.BigInteger, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False)
