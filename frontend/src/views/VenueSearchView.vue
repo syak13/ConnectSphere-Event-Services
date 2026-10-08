@@ -81,11 +81,11 @@ function validate() {
     errors.attendance = "Expected attendance is required.";
   } else if (
     !/^[0-9]+$/.test(String(criteria.attendance)) ||
-    Number(criteria.attendance) < 1 ||
-    Number(criteria.attendance) > 100000
+    Number(criteria.attendance) < 1
   ) {
-    errors.attendance = "Enter a whole number between 1 and 100000.";
+    errors.attendance = "Enter a positive whole number.";
   }
+  return Object.keys(errors).length === 0;
 }
 
 async function runSearch() {

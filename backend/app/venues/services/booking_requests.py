@@ -135,17 +135,17 @@ def submit_booking_requests(event: Event, venue_requests: list, user_id: int, to
         raise BookingRequestError(errors)
 
     bookings = [
-    VenueBooking(
-        event_id=event.id,
-        venue_id=venue.id,
-        requested_by=user_id,
-        status=PENDING,
-        start_datetime=start_at,
-        end_datetime=end_at,
-    )
-    for item, venue, start_at, end_at in valid
-]
-    
+        VenueBooking(
+            event_id=event.id,
+            venue_id=venue.id,
+            requested_by=user_id,
+            status=PENDING,
+            start_datetime=start_at,
+            end_datetime=end_at,
+        )
+        for item, venue, start_at, end_at in valid
+    ]
+
     db.session.add_all(bookings)
     db.session.commit()
     return bookings

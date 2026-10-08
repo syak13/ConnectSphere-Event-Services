@@ -109,8 +109,11 @@ def has_confirmed_conflict(
     if window is None:
         return False
 
-    start, end = window
-
+    start, end = compute_booking_window(
+        candidate,
+        venue,
+    )
+    
     approved_bookings = VenueBooking.query.filter(
         VenueBooking.venue_id == venue_id,
         VenueBooking.status == APPROVED,
@@ -122,15 +125,10 @@ def has_confirmed_conflict(
         )
 
     for other in approved_bookings.all():
-        other_window = compute_booking_window(
+        other_start, other_end = compute_booking_window(
             other,
             venue,
         )
-
-        if other_window is None:
-            continue
-
-        other_start, other_end = other_window
 
         if other_start < end and start < other_end:
             return True
