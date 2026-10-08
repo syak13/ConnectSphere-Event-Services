@@ -171,6 +171,8 @@ def test_recorded_unavailability_uses_half_open_overlap(
         (30, 30, datetime(2026, 10, 8, 8), datetime(2026, 10, 8, 9, 1), True),
         (30, 30, datetime(2026, 10, 8, 12, 59), datetime(2026, 10, 8, 13), True),
         (30, 30, datetime(2026, 10, 8, 13), datetime(2026, 10, 8, 14), False),
+        (1500, 0, datetime(2026, 10, 9, 12, 30), datetime(2026, 10, 9, 13, 30), True),
+        (0, 1500, datetime(2026, 10, 7, 8, 30), datetime(2026, 10, 7, 9, 30), True),
     ],
 )
 def test_setup_and_turnaround_are_included_in_effective_overlap_window(
@@ -192,6 +194,10 @@ def test_empty_result_for_no_capacity_match(app):
     _add_venue(app, capacity=49)
 
     assert _search(app, attendance=50) == []
+
+
+def test_attendance_above_capacity_column_range_returns_empty_without_query(app):
+    assert _search(app, attendance=4_294_967_296) == []
 
 
 def test_search_reflects_booking_status_and_capacity_mutations(app, coordinator):

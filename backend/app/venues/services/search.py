@@ -4,10 +4,8 @@ from datetime import datetime, timedelta
 from app.models.venue import BOOKING_APPROVED, Venue, VenueBooking, VenueUnavailability
 from app.venues.services.availability import compute_booking_window, pad_window
 
-# Coarse DB prefilter so a venue's whole booking history is never loaded; the
-# exact overlap check is done in Python. Must be >= the largest setup +
-# turnaround time any venue can be given.
-PREFILTER_BUFFER = timedelta(hours=24)
+# Venue capacity is INT UNSIGNED in database/schema.sql.
+MAX_VENUE_CAPACITY = (1 << 32) - 1
 
 
 def _is_available(venue: Venue, start: datetime, end: datetime) -> bool:
@@ -16,12 +14,15 @@ def _is_available(venue: Venue, start: datetime, end: datetime) -> bool:
     (also padded) and no recorded unavailability. Pending, rejected and
     withdrawn bookings never block. Windows that only touch do not overlap."""
     requested_start, requested_end = pad_window(start, end, venue)
+    prefilter_buffer = timedelta(
+        minutes=(venue.setup_minutes or 0) + (venue.turnaround_minutes or 0)
+    )
 
     approved = VenueBooking.query.filter(
         VenueBooking.venue_id == venue.id,
         VenueBooking.status == BOOKING_APPROVED,
-        VenueBooking.start_datetime < requested_end + PREFILTER_BUFFER,
-        VenueBooking.end_datetime > requested_start - PREFILTER_BUFFER,
+        VenueBooking.start_datetime < requested_end + prefilter_buffer,
+        VenueBooking.end_datetime > requested_start - prefilter_buffer,
     ).all()
     for booking in approved:
         busy_start, busy_end = compute_booking_window(booking, venue)
@@ -39,6 +40,9 @@ def _is_available(venue: Venue, start: datetime, end: datetime) -> bool:
 def search_venues(date, start_time, end_time, expected_attendance):
     """Active venues with capacity >= expected_attendance that are free for
     the whole window, sorted by name."""
+    if expected_attendance > MAX_VENUE_CAPACITY:
+        return []
+
     start = datetime.combine(date, start_time)
     end = datetime.combine(date, end_time)
 
