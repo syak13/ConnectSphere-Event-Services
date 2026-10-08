@@ -11,6 +11,10 @@ from app.events.services.review import (
     get_clarification_thread,
     respond_to_clarification,
     delete_clarification_request,
+    resubmit_rejected_event,
+    can_be_resubmitted,
+    get_full_review_history,
+    get_prior_rejection_decisions,
 )
 from app.events.services.status import InvalidTransitionError, change_status
 from app.events.services.assignment import assign_coordinator, reassign_coordinator
@@ -85,6 +89,46 @@ def two_real_coordinators(app):
         db.session.add_all([user_a, user_b])
         db.session.commit()
         return user_a.id, user_b.id
+
+def _persist_event(coordinator_id=None, status="under_review", **overrides):
+    """Persists a minimal, valid, submittable Event."""
+    values = dict(
+        organiser_id=100,
+        coordinator_id=coordinator_id,
+        status=status,
+        name="Resubmission Test Event",
+        purpose="Testing resubmission",
+        description="Original description.",
+        proposed_date=date(2030, 6, 1),
+        proposed_time=time(9, 30),
+        expected_attendance=80,
+        capacity_needed=60,
+        required_layout="theatre",
+        accessibility_needs="Step-free access",
+        registration_required=True,
+        intended_capacity=60,
+    )
+    values.update(overrides)
+    event = Event(**values)
+    db.session.add(event)
+    db.session.commit()
+    return event
+
+
+def _persist_rejected_event(coordinator_id, reason="Insufficient lead time.", **overrides):
+    event = _persist_event(coordinator_id=coordinator_id, **overrides)
+    reject_event(event, coordinator_id, reason)
+    return event
+
+
+def _build_three_generation_chain(coordinator_id):
+    """first (rejected) -> second (clarification, then rejected) -> third (under review)"""
+    first = _persist_rejected_event(coordinator_id, reason="First rejection reason.")
+    second = resubmit_rejected_event(first, first.organiser_id, {})
+    request_clarification(second, second.coordinator_id, "Please clarify the catering plan.")
+    reject_event(second, second.coordinator_id, "Second rejection reason.")
+    third = resubmit_rejected_event(second, second.organiser_id, {})
+    return first, second, third
 
 def test_request_clarification(app, event, coordinator):
     with app.app_context():
@@ -707,3 +751,309 @@ def test_require_confirmation_is_required_even_without_any_unresolved_clarificat
         event.clarification_flag = False
         result = _require_confirmation(event, {}, "cancel")
         assert result is not None  # confirmation is unconditional, not just a warning-triggered thing
+
+def test_review_decision_is_empty_before_any_decision(app):
+    with app.app_context():
+        pending = _persist_event()
+        decision = pending.to_dict()["reviewDecision"]
+        assert decision["outcome"] is None
+        assert decision["reason"] is None
+        assert decision["timestamp"] is None
+        assert decision["coordinatorId"] is None
+        assert decision["coordinatorName"] is None
+
+
+def test_rejection_decision_records_outcome_reason_coordinator_and_time(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        rejected = _persist_rejected_event(coordinator_a_id, reason="Insufficient lead time.")
+
+        decision = rejected.to_dict()["reviewDecision"]
+        assert decision["outcome"] == "rejected"
+        assert decision["reason"] == "Insufficient lead time."
+        assert decision["coordinatorId"] == coordinator_a_id
+        assert decision["coordinatorName"] == "Real Coordinator A"
+        datetime.fromisoformat(decision["timestamp"])  # valid ISO timestamp, raises if not
+
+
+def test_approval_decision_records_outcome_comments_coordinator_and_time(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        event = _persist_event(coordinator_id=coordinator_a_id)
+        approve_event(event, coordinator_a_id, "Looks good.")
+
+        decision = event.to_dict()["reviewDecision"]
+        assert decision["outcome"] == "approved"
+        assert decision["reason"] == "Looks good."
+        assert decision["coordinatorId"] == coordinator_a_id
+        assert decision["coordinatorName"] == "Real Coordinator A"
+        datetime.fromisoformat(decision["timestamp"])
+
+
+def test_approval_without_comments_has_no_reason(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        event = _persist_event(coordinator_id=coordinator_a_id)
+        approve_event(event, coordinator_a_id)
+
+        decision = event.to_dict()["reviewDecision"]
+        assert decision["outcome"] == "approved"
+        assert decision["reason"] is None
+        assert decision["coordinatorName"] == "Real Coordinator A"
+
+
+def test_decision_is_attributed_to_the_coordinator_who_actually_decided(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, coordinator_b_id = two_real_coordinators
+        event = _persist_event(coordinator_id=coordinator_a_id)
+        reassign_coordinator(event, User.query.get(coordinator_b_id))
+        approve_event(event, coordinator_b_id, "Approved after handover.")
+
+        decision = event.to_dict()["reviewDecision"]
+        assert decision["coordinatorId"] == coordinator_b_id
+        assert decision["coordinatorName"] == "Real Coordinator B"
+
+@pytest.mark.parametrize(
+    "status",
+    ["draft", "submitted", "under_review", "approved", "planning", "confirmed", "completed", "cancelled"],
+)
+def test_only_rejected_requests_can_be_resubmitted(app, status):
+    with app.app_context():
+        event = _persist_event(status=status)
+        assert can_be_resubmitted(event) is False
+
+
+def test_rejected_request_that_was_never_resubmitted_can_be_resubmitted(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        rejected = _persist_rejected_event(coordinator_a_id)
+        assert can_be_resubmitted(rejected) is True
+
+
+def test_rejected_request_cannot_be_resubmitted_twice(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        original = _persist_rejected_event(coordinator_a_id)
+        resubmission = resubmit_rejected_event(original, original.organiser_id, {})
+
+        assert can_be_resubmitted(original) is False     # its one resubmission is used
+        assert can_be_resubmitted(resubmission) is False  # under review, not rejected
+
+
+def test_each_generation_in_a_resubmission_chain_gets_exactly_one_resubmission(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        first = _persist_rejected_event(coordinator_a_id, reason="First rejection reason.")
+        assert can_be_resubmitted(first) is True
+
+        second = resubmit_rejected_event(first, first.organiser_id, {})
+        reject_event(second, second.coordinator_id, "Second rejection reason.")
+        # the rejected resubmission is a new rejected request with its own single resubmission
+        assert can_be_resubmitted(second) is True
+        assert can_be_resubmitted(first) is False
+
+        third = resubmit_rejected_event(second, second.organiser_id, {})
+        assert can_be_resubmitted(second) is False
+        assert can_be_resubmitted(first) is False
+        assert third.resubmitted_from_event_id == second.id
+        assert third.status == "under_review"
+
+def test_resubmission_creates_a_new_linked_event_under_review(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, coordinator_b_id = two_real_coordinators
+        original = _persist_rejected_event(coordinator_a_id, reason="Date clashes with another event.")
+
+        new_event = resubmit_rejected_event(original, original.organiser_id, {})
+
+        assert new_event.id != original.id
+        assert new_event.resubmitted_from_event_id == original.id
+        assert new_event.status == "under_review"
+        assert new_event.submitted_at is not None
+        assert new_event.coordinator_id in (coordinator_a_id, coordinator_b_id)
+
+        # the original stays as the permanent rejected record
+        assert original.status == "rejected"
+        assert original.review_outcome == "rejected"
+        assert original.review_reason == "Date clashes with another event."
+
+
+def test_resubmission_carries_over_original_details_when_nothing_is_edited(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        original = _persist_rejected_event(coordinator_a_id)
+
+        new_event = resubmit_rejected_event(original, original.organiser_id, {})
+
+        for attr in (
+            "name",
+            "purpose",
+            "description",
+            "proposed_date",
+            "proposed_time",
+            "expected_attendance",
+            "capacity_needed",
+            "required_layout",
+            "accessibility_needs",
+            "registration_required",
+            "intended_capacity",
+        ):
+            assert getattr(new_event, attr) == getattr(original, attr), attr
+
+
+def test_resubmission_edits_apply_to_the_new_event_only(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        original = _persist_rejected_event(coordinator_a_id)
+
+        new_event = resubmit_rejected_event(
+            original,
+            original.organiser_id,
+            {"description": "Revised description addressing the rejection.", "proposed_date": date(2030, 7, 15)},
+        )
+
+        assert new_event.description == "Revised description addressing the rejection."
+        assert new_event.proposed_date == date(2030, 7, 15)
+        assert original.description == "Original description."
+        assert original.proposed_date == date(2030, 6, 1)
+
+
+def test_resubmission_does_not_inherit_the_previous_decision(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        original = _persist_rejected_event(coordinator_a_id)
+
+        new_event = resubmit_rejected_event(original, original.organiser_id, {})
+
+        assert new_event.review_outcome is None
+        assert new_event.review_reason is None
+        assert new_event.review_timestamp is None
+        assert new_event.review_coordinator_id is None
+
+
+def test_each_resubmission_shows_its_own_latest_decision(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        first = _persist_rejected_event(coordinator_a_id, reason="First rejection reason.")
+        second = resubmit_rejected_event(first, first.organiser_id, {})
+        reject_event(second, second.coordinator_id, "Still missing the catering plan.")
+
+        assert second.status == "rejected"
+        assert second.to_dict()["reviewDecision"]["reason"] == "Still missing the catering plan."
+        assert first.to_dict()["reviewDecision"]["reason"] == "First rejection reason."
+
+
+def test_same_rejected_request_cannot_be_resubmitted_twice(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        original = _persist_rejected_event(coordinator_a_id)
+        resubmit_rejected_event(original, original.organiser_id, {})
+
+        with pytest.raises(ValueError, match="already been resubmitted"):
+            resubmit_rejected_event(original, original.organiser_id, {})
+
+        # the blocked attempt must not leave a second linked record behind
+        assert Event.query.filter_by(resubmitted_from_event_id=original.id).count() == 1
+
+
+def test_resubmission_requires_the_owning_organiser(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        original = _persist_rejected_event(coordinator_a_id)
+
+        with pytest.raises(PermissionError, match="Only the requesting Organiser can resubmit this request"):
+            resubmit_rejected_event(original, 999, {})
+
+        assert Event.query.filter_by(resubmitted_from_event_id=original.id).count() == 0
+
+
+@pytest.mark.parametrize("status", ["draft", "under_review", "approved", "cancelled"])
+def test_only_a_rejected_request_can_be_resubmitted(app, two_real_coordinators, status):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        event = _persist_event(coordinator_id=coordinator_a_id, status=status)
+
+        with pytest.raises(ValueError, match="Only a rejected request can be resubmitted"):
+            resubmit_rejected_event(event, event.organiser_id, {})
+
+def test_first_submission_has_no_prior_decisions(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        event = _persist_event(coordinator_id=coordinator_a_id)
+        assert get_prior_rejection_decisions(event) == []
+
+
+def test_prior_decisions_list_earlier_rejections_oldest_first(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        first, second, third = _build_three_generation_chain(coordinator_a_id)
+
+        prior = get_prior_rejection_decisions(third)
+
+        assert [d["eventId"] for d in prior] == [first.id, second.id]
+        assert [d["outcome"] for d in prior] == ["rejected", "rejected"]
+        assert [d["reason"] for d in prior] == ["First rejection reason.", "Second rejection reason."]
+        assert all(d["coordinatorName"] in ("Real Coordinator A", "Real Coordinator B") for d in prior)
+
+
+def test_prior_decisions_exclude_the_events_own_decision(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        first, second, _third = _build_three_generation_chain(coordinator_a_id)
+
+        # second was itself rejected, but its own decision is shown separately
+        prior = get_prior_rejection_decisions(second)
+        assert [d["eventId"] for d in prior] == [first.id]
+
+
+def test_prior_decisions_ignore_unrelated_events(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        first, second, third = _build_three_generation_chain(coordinator_a_id)
+        unrelated = _persist_rejected_event(coordinator_a_id, reason="Unrelated rejection.")
+
+        prior = get_prior_rejection_decisions(third)
+        assert unrelated.id not in [d["eventId"] for d in prior]
+
+
+def test_full_review_history_spans_every_generation_oldest_first(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        first, second, third = _build_three_generation_chain(coordinator_a_id)
+
+        history = get_full_review_history(third)
+
+        assert [(h["eventId"], h["action"]) for h in history] == [
+            (first.id, "rejected"),
+            (second.id, "clarification_requested"),
+            (second.id, "rejected"),
+        ]
+        assert [h["comments"] for h in history] == [
+            "First rejection reason.",
+            "Please clarify the catering plan.",
+            "Second rejection reason.",
+        ]
+
+
+def test_full_review_history_flags_which_entries_belong_to_the_current_submission(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        _first, second, _third = _build_three_generation_chain(coordinator_a_id)
+
+        history = get_full_review_history(second)
+
+        # first's rejection is an earlier submission; second's two entries are current
+        assert [h["isCurrentSubmission"] for h in history] == [False, True, True]
+
+
+def test_full_review_history_for_an_unresubmitted_event_contains_only_its_own_entries(app, two_real_coordinators):
+    with app.app_context():
+        coordinator_a_id, _ = two_real_coordinators
+        event = _persist_event(coordinator_id=coordinator_a_id)
+        request_clarification(event, coordinator_a_id, "Please confirm the headcount.")
+
+        history = get_full_review_history(event)
+
+        assert len(history) == 1
+        assert history[0]["action"] == "clarification_requested"
+        assert history[0]["comments"] == "Please confirm the headcount."
+        assert history[0]["isCurrentSubmission"] is True

@@ -201,7 +201,9 @@ def get_event(event_id):
     event = Event.query.get(event_id)
     if not event or not _can_view(event, user):
         return jsonify({"error": "Event not found"}), 404
-    return jsonify(event.to_dict()), 200
+    payload = event.to_dict()
+    payload["canResubmit"] = review.can_be_resubmitted(event)
+    return jsonify(payload), 200
 
 
 # ---------------------------------------------------------------------
@@ -308,6 +310,8 @@ def review_event_details(event_id):
     payload = event.to_dict()
     payload["displayFields"] = _build_display_fields(event)
     payload["reviewHistory"] = [r.to_dict() for r in event.reviews]
+    payload["fullReviewHistory"] = review.get_full_review_history(event)
+    payload["priorDecisions"] = review.get_prior_rejection_decisions(event)
     payload["clarificationThread"] = review.get_clarification_thread(event)
     payload["isAssignedCoordinator"] = event.coordinator_id == user.id
     payload["availableActions"] = (
@@ -315,6 +319,7 @@ def review_event_details(event_id):
         if event.status in ("submitted", "under_review")
         else []
     )
+    payload["canResubmit"] = review.can_be_resubmitted(event)
     return jsonify(payload), 200
 
 @events_bp.post("/<int:event_id>/clarification")
@@ -448,7 +453,10 @@ def review_outcome(event_id):
                 "clarificationFlag": event.clarification_flag,
                 "clarificationComments": event.clarification_comments,
                 "reviewHistory": [r.to_dict() for r in event.reviews],
+                "fullReviewHistory": review.get_full_review_history(event),
+                "priorDecisions": review.get_prior_rejection_decisions(event),
                 "clarificationThread": review.get_clarification_thread(event),
+                "canResubmit": review.can_be_resubmitted(event),
             }
         ),
         200,
