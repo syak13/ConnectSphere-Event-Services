@@ -24,9 +24,8 @@
           Expected attendance
           <input
             v-model="criteria.attendance"
-            type="number"
-            min="1"
-            step="1"
+            type="text"
+            inputmode="numeric"
             :aria-invalid="!!errors.attendance"
           />
           <span v-if="errors.attendance" class="field-error">{{ errors.attendance }}</span>

@@ -4,6 +4,9 @@ from datetime import datetime, timedelta
 from app.models.venue import BOOKING_APPROVED, Venue, VenueBooking, VenueUnavailability
 from app.venues.services.availability import compute_booking_window, pad_window
 
+# Venue capacity is INT UNSIGNED in database/schema.sql.
+MAX_VENUE_CAPACITY = (1 << 32) - 1
+
 
 def _is_available(venue: Venue, start: datetime, end: datetime) -> bool:
     """A venue is free if the requested window, padded by the venue's own
@@ -37,6 +40,9 @@ def _is_available(venue: Venue, start: datetime, end: datetime) -> bool:
 def search_venues(date, start_time, end_time, expected_attendance):
     """Active venues with capacity >= expected_attendance that are free for
     the whole window, sorted by name."""
+    if expected_attendance > MAX_VENUE_CAPACITY:
+        return []
+
     start = datetime.combine(date, start_time)
     end = datetime.combine(date, end_time)
 
