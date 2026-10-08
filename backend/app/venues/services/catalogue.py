@@ -1,8 +1,12 @@
 """Venue Catalogue epic."""
 from app.extensions import db
-from app.models.venue import Venue, VenueAvailabilityFlag, VenueBooking
-
-ACTIVE_BOOKING_STATUSES = ("pending", "confirmed")
+from app.models.venue import (
+    ACTIVE_BOOKING_STATUSES,
+    BOOKING_APPROVED,
+    Venue,
+    VenueAvailabilityFlag,
+    VenueBooking,
+)
 SUITABILITY_FIELDS = {"capacity", "supported_layouts", "accessibility_features"}
 TIMING_FIELDS = {"setup_minutes", "turnaround_minutes"}  # Week 7 change #1
 
@@ -42,7 +46,7 @@ def _flag_suitability_change(venue: Venue, reason: str):
     from app.venues.services.suitability import check_suitability
 
     confirmed = VenueBooking.query.filter(
-        VenueBooking.venue_id == venue.id, VenueBooking.status == "confirmed"
+        VenueBooking.venue_id == venue.id, VenueBooking.status == BOOKING_APPROVED
     ).all()
 
     flags = []
