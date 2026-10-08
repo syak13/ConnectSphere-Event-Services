@@ -171,6 +171,8 @@ def test_recorded_unavailability_uses_half_open_overlap(
         (30, 30, datetime(2026, 10, 8, 8), datetime(2026, 10, 8, 9, 1), True),
         (30, 30, datetime(2026, 10, 8, 12, 59), datetime(2026, 10, 8, 13), True),
         (30, 30, datetime(2026, 10, 8, 13), datetime(2026, 10, 8, 14), False),
+        (1500, 0, datetime(2026, 10, 9, 12, 30), datetime(2026, 10, 9, 13, 30), True),
+        (0, 1500, datetime(2026, 10, 7, 8, 30), datetime(2026, 10, 7, 9, 30), True),
     ],
 )
 def test_setup_and_turnaround_are_included_in_effective_overlap_window(

@@ -149,6 +149,23 @@ def test_search_endpoint_rejects_each_missing_required_field_without_search(
     assert missing_field in response.get_json()["errors"]
 
 
+@pytest.mark.parametrize("blank_field", ["date", "start_time", "end_time", "attendance"])
+def test_search_endpoint_rejects_blank_required_fields_without_search(
+    client, coordinator, auth_header, monkeypatch, blank_field
+):
+    params = {**VALID_PARAMS, blank_field: "   "}
+    monkeypatch.setattr(
+        search_service,
+        "search_venues",
+        lambda *args, **kwargs: pytest.fail("search service must not run"),
+    )
+
+    response = _request(client, auth_header, params)
+
+    assert response.status_code == 400
+    assert blank_field in response.get_json()["errors"]
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
