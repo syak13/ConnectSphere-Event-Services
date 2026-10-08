@@ -1,69 +1,51 @@
-"""Venue Search and Filtering epic."""
+"""Venue Search and Filtering epic: Story 1 (date, time, attendance)."""
 from datetime import datetime, timedelta
 
-from app.models.venue import Venue, VenueBooking, VenueUnavailability
+from app.models.venue import BOOKING_APPROVED, Venue, VenueBooking, VenueUnavailability
+from app.venues.services.availability import compute_booking_window, pad_window
 
-CONFIRMED = "confirmed"
+# Coarse DB prefilter so a venue's whole booking history is never loaded; the
+# exact overlap check is done in Python. Must be >= the largest setup +
+# turnaround time any venue can be given.
+PREFILTER_BUFFER = timedelta(hours=24)
 
 
-def _is_available(venue_id: int, start: datetime, end: datetime) -> bool:
-    overlapping_booking = VenueBooking.query.filter(
-        VenueBooking.venue_id == venue_id,
-        VenueBooking.status == CONFIRMED,
+def _is_available(venue: Venue, start: datetime, end: datetime) -> bool:
+    """A venue is free if the requested window, padded by the venue's own
+    setup/turnaround time (Week 7 change #1), overlaps no APPROVED booking
+    (also padded) and no recorded unavailability. Pending, rejected and
+    withdrawn bookings never block. Windows that only touch do not overlap."""
+    requested_start, requested_end = pad_window(start, end, venue)
+
+    approved = VenueBooking.query.filter(
+        VenueBooking.venue_id == venue.id,
+        VenueBooking.status == BOOKING_APPROVED,
+        VenueBooking.start_datetime < requested_end + PREFILTER_BUFFER,
+        VenueBooking.end_datetime > requested_start - PREFILTER_BUFFER,
     ).all()
-    for b in overlapping_booking:
-        event = b.event
-        if event and event.proposed_date:
-            # Approximate the event's window as its proposed date/time,
-            # defaulting to a 2-hour slot when no explicit end is modelled.
-            event_start = datetime.combine(event.proposed_date, event.proposed_time or datetime.min.time())
-            event_end = event_start + timedelta(hours=2)
-            if event_start < end and start < event_end:
-                return False
+    for booking in approved:
+        busy_start, busy_end = compute_booking_window(booking, venue)
+        if busy_start < requested_end and requested_start < busy_end:
+            return False
 
-    blocks = VenueUnavailability.query.filter(
-        VenueUnavailability.venue_id == venue_id,
-        VenueUnavailability.end_datetime > start,
-        VenueUnavailability.start_datetime < end,
+    closure = VenueUnavailability.query.filter(
+        VenueUnavailability.venue_id == venue.id,
+        VenueUnavailability.start_datetime < requested_end,
+        VenueUnavailability.end_datetime > requested_start,
+    ).first()
+    return closure is None
+
+
+def search_venues(date, start_time, end_time, expected_attendance):
+    """Active venues with capacity >= expected_attendance that are free for
+    the whole window, sorted by name."""
+    start = datetime.combine(date, start_time)
+    end = datetime.combine(date, end_time)
+
+    venues = Venue.query.filter(
+        Venue.is_active.is_(True),
+        Venue.capacity >= expected_attendance,
     ).all()
-    return len(blocks) == 0
 
-
-def search_venues(
-    date=None,
-    time=None,
-    expected_attendance=None,
-    location=None,
-    accessibility_needs=None,
-    required_facilities=None,
-    required_layout=None,
-):
-    query = Venue.query.filter_by(is_active=True)
-
-    if expected_attendance:
-        query = query.filter(Venue.capacity >= expected_attendance)
-    if location:
-        query = query.filter(Venue.location.ilike(f"%{location}%"))
-
-    candidates = query.all()
-
-    results = []
-    for venue in candidates:
-        if required_layout and (venue.supported_layouts is None or required_layout not in venue.supported_layouts):
-            continue
-        if required_facilities:
-            venue_facilities = set(venue.facilities or [])
-            if not set(required_facilities).issubset(venue_facilities):
-                continue
-        if accessibility_needs:
-            venue_access = set(venue.accessibility_features or [])
-            if not set(accessibility_needs).issubset(venue_access):
-                continue
-        if date and time:
-            start = datetime.combine(date, time)
-            end = start + timedelta(hours=2)
-            if not _is_available(venue.id, start, end):
-                continue
-        results.append(venue)
-
-    return results
+    available = [venue for venue in venues if _is_available(venue, start, end)]
+    return sorted(available, key=lambda venue: venue.name.casefold())

@@ -1,3 +1,4 @@
+import re
 from datetime import date, datetime, time
 
 from flask import Blueprint, jsonify, request
@@ -155,16 +156,65 @@ def resolve_availability_flag(flag_id):
 @roles_required("event_coordinator")
 def search_venues():
     args = request.args
-    date_str = args.get("date")
-    time_str = args.get("time")
+    errors = {}
+
+    date_text = args.get("date", "").strip()
+    start_text = args.get("start_time", "").strip()
+    end_text = args.get("end_time", "").strip()
+    attendance_text = args.get("attendance", "").strip()
+
+    event_date = None
+    if not date_text:
+        errors["date"] = "Date is required."
+    else:
+        try:
+            event_date = datetime.strptime(date_text, "%Y-%m-%d").date()
+        except ValueError:
+            errors["date"] = "Enter a valid date."
+
+    parsed_times = {}
+    for field, value in (("start_time", start_text), ("end_time", end_text)):
+        if not value:
+            errors[field] = f"{field.replace('_', ' ').capitalize()} is required."
+            continue
+        try:
+            parsed_times[field] = datetime.strptime(value, "%H:%M").time()
+        except ValueError:
+            errors[field] = "Enter a valid time."
+
+    attendance = None
+    if not attendance_text:
+        errors["attendance"] = "Expected attendance is required."
+    elif not re.fullmatch(r"[0-9]+", attendance_text):
+        errors["attendance"] = "Enter a positive whole number."
+    else:
+        try:
+            attendance = int(attendance_text)
+        except ValueError:
+            errors["attendance"] = "Enter a positive whole number."
+        else:
+            if attendance < 1:
+                errors["attendance"] = "Enter a positive whole number."
+
+    if (
+        "start_time" not in errors
+        and "end_time" not in errors
+        and parsed_times["end_time"] <= parsed_times["start_time"]
+    ):
+        errors["end_time"] = "End time must be after start time."
+
+    if errors:
+        return jsonify({"errors": errors}), 400
+
     results = search.search_venues(
-        date=datetime.fromisoformat(date_str).date() if date_str else None,
-        time=datetime.fromisoformat(f"2000-01-01T{time_str}").time() if time_str else None,
-        expected_attendance=args.get("attendance", type=int),
-        location=args.get("location"),
-        accessibility_needs=args.getlist("accessibility"),
-        required_facilities=args.getlist("facilities"),
-        required_layout=args.get("layout"),
+        date=event_date,
+        start_time=parsed_times["start_time"],
+        end_time=parsed_times["end_time"],
+        expected_attendance=attendance,
+        # location=args.get("location"),
+        # accessibility_needs=args.getlist("accessibility"),
+        # required_facilities=args.getlist("facilities"),
+        # required_layout=args.get("layout"),
     )
     return jsonify([v.to_dict() for v in results]), 200
 

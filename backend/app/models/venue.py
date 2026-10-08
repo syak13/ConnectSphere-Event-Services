@@ -161,7 +161,7 @@ class VenueBooking(db.Model):
 class VenueAvailabilityFlag(db.Model):
     """Flag raised when a venue's availability changes in a way that
     affects an already-planned upcoming event (e.g. a new maintenance
-    block overlaps a confirmed booking)."""
+    block overlaps an approved booking)."""
     __tablename__ = "venue_availability_flags"
 
     id = db.Column(db.BigInteger, primary_key=True)
