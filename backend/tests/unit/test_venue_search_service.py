@@ -196,6 +196,10 @@ def test_empty_result_for_no_capacity_match(app):
     assert _search(app, attendance=50) == []
 
 
+def test_attendance_above_capacity_column_range_returns_empty_without_query(app):
+    assert _search(app, attendance=4_294_967_296) == []
+
+
 def test_search_reflects_booking_status_and_capacity_mutations(app, coordinator):
     venue_id = _add_venue(app, capacity=49)
     booking_id = _add_booking(

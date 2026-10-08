@@ -240,6 +240,23 @@ def test_search_endpoint_accepts_positive_attendance_above_arbitrary_old_cap(
     assert response.get_json() == []
 
 
+@pytest.mark.parametrize(
+    "attendance",
+    ["9223372036854775808", "9" * 5000],
+)
+def test_search_endpoint_returns_no_matches_for_attendance_above_database_capacity_range(
+    client, coordinator, auth_header, attendance
+):
+    response = _request(
+        client,
+        auth_header,
+        {**VALID_PARAMS, "attendance": attendance},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == []
+
+
 def test_search_endpoint_requires_coordinator_authentication(client):
     response = client.get("/api/venues/search", query_string=VALID_PARAMS)
 
