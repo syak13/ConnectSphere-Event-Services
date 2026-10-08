@@ -222,6 +222,8 @@ def resubmit_rejected_event(original: Event, organiser_id: int, data: dict) -> E
         raise PermissionError("Only the requesting Organiser can resubmit this request")
     if original.status != "rejected":
         raise ValueError("Only a rejected request can be resubmitted")
+    if not can_be_resubmitted(original):
+        raise ValueError("This request has already been resubmitted. Please open the latest resubmission instead.")
 
     new_event = Event(
         organiser_id=organiser_id,
@@ -273,3 +275,76 @@ def get_clarification_thread(event: Event) -> list:
             }
         )
     return thread
+
+def can_be_resubmitted(event: Event) -> bool:
+    """True if this rejected request has not yet been resubmitted. Each
+    rejected request can be resubmitted exactly once, but a resubmission
+    that is itself rejected becomes a new rejected request with its own
+    single resubmission available, so a chain can keep growing for as
+    long as the Coordinator keeps rejecting."""
+    if event.status != "rejected":
+        return False
+    return Event.query.filter_by(resubmitted_from_event_id=event.id).first() is None
+
+def get_full_review_history(event: Event) -> list:
+    """Walks back through the resubmission chain (rejected -> new record,
+    via resubmitted_from_event_id) and returns every review action across
+    all generations, oldest first, each tagged with which event it
+    belongs to. This is how "previous rejection reasons and review
+    history" stay visible even though a resubmission is a brand-new
+    Event row, not a reused one."""
+    chain = []
+    current = event
+    visited = set()
+    while current is not None and current.id not in visited:
+        visited.add(current.id)
+        chain.append(current)
+        if current.resubmitted_from_event_id is None:
+            break
+        current = Event.query.get(current.resubmitted_from_event_id)
+    chain.reverse()  # oldest first
+
+    history = []
+    for e in chain:
+        for r in e.reviews:
+            history.append(
+                {
+                    "eventId": e.id,
+                    "reviewId": r.id,
+                    "action": r.action,
+                    "coordinatorId": r.coordinator_id,
+                    "comments": r.comments,
+                    "createdAt": r.created_at.isoformat() if r.created_at else None,
+                    "isCurrentSubmission": e.id == event.id,
+                }
+            )
+    return history
+
+
+def get_prior_rejection_decisions(event: Event) -> list:
+    """Every review decision (approved/rejected) from EARLIER generations
+    in the resubmission chain - not the current event's own decision.
+    The current event's live status/reviewDecision (already in
+    Event.to_dict()) always reflects the latest submission on its own;
+    this is purely the historical trail behind it."""
+    chain = []
+    current = event
+    visited = set()
+    while current is not None and current.id not in visited:
+        visited.add(current.id)
+        if current.id != event.id and current.review_outcome:
+            chain.append(
+                {
+                    "eventId": current.id,
+                    "outcome": current.review_outcome,
+                    "reason": current.review_reason,
+                    "timestamp": current.review_timestamp.isoformat() if current.review_timestamp else None,
+                    "coordinatorId": current.review_coordinator_id,
+                    "coordinatorName": current.review_coordinator.name if current.review_coordinator else None,
+                }
+            )
+        if current.resubmitted_from_event_id is None:
+            break
+        current = Event.query.get(current.resubmitted_from_event_id)
+    chain.reverse()
+    return chain

@@ -17,12 +17,14 @@
     <main>
       <router-view />
     </main>
+    <ConfirmDialog />
   </div>
 </template>
 
 <script setup>
 import { useRouter } from "vue-router";
 import { useAuthStore } from "./stores/auth";
+import ConfirmDialog from './components/ConfirmDialog.vue';
 
 const auth = useAuthStore();
 const router = useRouter();
