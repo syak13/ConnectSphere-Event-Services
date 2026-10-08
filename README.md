@@ -65,6 +65,8 @@ This creates one user per role (`organiser@example.com`,
 `techsupport@example.com`, `attendee@example.com`), all with the password
 `Password123!`.
 
+The seed script now also creates sample venues `Main Auditorium`, `Seminar Room A` and `Banquet Hall`.
+
 Run the API:
 
 ```bash
