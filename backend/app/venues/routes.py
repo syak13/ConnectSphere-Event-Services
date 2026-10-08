@@ -183,16 +183,24 @@ def search_venues():
             errors[field] = "Enter a valid time."
 
     attendance = None
+    attendance_exceeds_capacity = False
     if not attendance_text:
         errors["attendance"] = "Expected attendance is required."
     elif not re.fullmatch(r"[0-9]+", attendance_text):
         errors["attendance"] = "Enter a positive whole number."
     else:
-        try:
-            attendance = int(attendance_text)
-        except ValueError:
-            errors["attendance"] = "Enter a positive whole number."
+        normalized_attendance = attendance_text.lstrip("0") or "0"
+        maximum_attendance = str(search.MAX_VENUE_CAPACITY)
+        if (
+            len(normalized_attendance) > len(maximum_attendance)
+            or (
+                len(normalized_attendance) == len(maximum_attendance)
+                and normalized_attendance > maximum_attendance
+            )
+        ):
+            attendance_exceeds_capacity = True
         else:
+            attendance = int(normalized_attendance)
             if attendance < 1:
                 errors["attendance"] = "Enter a positive whole number."
 
@@ -205,6 +213,9 @@ def search_venues():
 
     if errors:
         return jsonify({"errors": errors}), 400
+
+    if attendance_exceeds_capacity:
+        return jsonify([]), 200
 
     results = search.search_venues(
         date=event_date,
