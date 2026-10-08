@@ -58,7 +58,7 @@ class Venue(db.Model):
 class VenueUnavailability(db.Model):
     """Venue Staff blocking a venue for maintenance, renovation, etc.
     (Venue Availability Calendar epic)."""
-    __tablename__ = "venue_unavailabilities"
+    __tablename__ = "venue_unavailability"
 
     id = db.Column(db.BigInteger, primary_key=True)
     venue_id = db.Column(db.BigInteger, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False)
