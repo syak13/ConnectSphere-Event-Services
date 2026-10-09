@@ -63,24 +63,60 @@ def submit_booking_request(
     return booking
 
 
+
 def withdraw_booking_request(
     booking: VenueBooking,
     user_id: int,
 ) -> VenueBooking:
-    """Withdraw a pending booking request."""
+    """Withdraw a pending booking request owned by this coordinator."""
 
-    if booking.status != PENDING:
+    # AC6: Only the coordinator who submitted the request
+    # can withdraw it.
+    if booking.requested_by != user_id:
         raise ValueError(
-            "Only a pending booking request can be withdrawn"
+            "You are not authorised to withdraw this booking request"
         )
 
-    booking.status = WITHDRAWN
-    booking.decided_by = user_id
-    booking.decided_at = utcnow()
+    # AC3 & AC4: Only pending bookings can be withdrawn.
+    # Use a conditional database update to prevent a stale status
+    # check from overwriting a staff decision.
+    try:
+        updated = (
+            VenueBooking.query
+            .filter(
+                VenueBooking.id == booking.id,
+                VenueBooking.requested_by == user_id,
+                VenueBooking.status == PENDING,
+            )
+            .update(
+                {
+                    VenueBooking.status: WITHDRAWN,
+                    VenueBooking.decided_by: user_id,
+                    VenueBooking.decided_at: utcnow(),
+                },
+                synchronize_session=False,
+            )
+        )
 
-    db.session.commit()
+        if updated == 0:
+            db.session.rollback()
+            raise ValueError(
+                "This booking request has already been decided "
+                "or is no longer pending"
+            )
 
-    return booking
+        db.session.commit()
+
+        db.session.refresh(booking)
+        return booking
+
+    except ValueError:
+        raise
+
+    except Exception:
+        db.session.rollback()
+        raise
+
 
 
 def has_confirmed_conflict(

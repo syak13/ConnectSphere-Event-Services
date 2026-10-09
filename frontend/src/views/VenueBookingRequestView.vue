@@ -140,12 +140,13 @@
       </div>
 
       <p v-if="statusError" class="error-message" role="alert">{{ statusError }}</p>
+      <p v-if="withdrawNotice" class="success-message" role="status">{{ withdrawNotice }}</p>
       <p v-if="statusLoading" class="status-message">Loading booking requests...</p>
       <p v-else-if="!statusError && myBookings.length === 0" class="status-message">
         You haven't submitted any venue booking requests yet.
       </p>
 
-      <div v-if="myBookings.length" class="booking-list">
+      <div v-if="!statusLoading && !statusError && myBookings.length" class="booking-list">
         <article v-for="booking in myBookings" :key="booking.id" class="booking-card">
           <div class="booking-heading">
             <div>
@@ -165,9 +166,38 @@
           <p v-if="booking.status === 'rejected' && booking.decisionReason" class="rejection-reason">
             <strong>Reason for rejection:</strong> {{ booking.decisionReason }}
           </p>
+          <div v-if="booking.status === 'pending'" class="booking-actions">
+            <button type="button" class="btn withdraw-btn" :disabled="withdrawingId === booking.id"
+              @click="openWithdrawConfirmation(booking)">
+              {{ withdrawingId === booking.id ? "Withdrawing..." : "Withdraw Request" }}
+            </button>
+          </div>
+          <p v-if="withdrawErrors[booking.id]" class="error-message" role="alert">
+            {{ withdrawErrors[booking.id] }}
+          </p>
         </article>
       </div>
     </section>
+
+    <div v-if="bookingToWithdraw" class="modal-backdrop" @click.self="cancelWithdrawal">
+      <div class="confirmation-dialog" role="alertdialog" aria-modal="true"
+        aria-labelledby="withdraw-dialog-title" aria-describedby="withdraw-dialog-description">
+        <h3 id="withdraw-dialog-title">Withdraw booking request?</h3>
+        <p id="withdraw-dialog-description">
+          Are you sure you want to withdraw the pending request for
+          <strong>{{ bookingToWithdraw.venueName || `Venue #${bookingToWithdraw.venueId}` }}</strong>?
+          You cannot undo this withdrawal.
+        </p>
+        <div class="confirmation-actions">
+          <button type="button" class="btn secondary" :disabled="withdrawingId !== null"
+            @click="cancelWithdrawal">Cancel</button>
+          <button type="button" class="btn withdraw-btn" :disabled="withdrawingId !== null"
+            @click="confirmWithdrawal">
+            {{ withdrawingId !== null ? "Withdrawing..." : "Yes, Withdraw" }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -187,6 +217,10 @@ const successMessage = ref("");
 const myBookings = ref([]);
 const statusLoading = ref(false);
 const statusError = ref("");
+const bookingToWithdraw = ref(null);
+const withdrawingId = ref(null);
+const withdrawErrors = ref({});
+const withdrawNotice = ref("");
 
 const selectedEvent = computed(() =>
   events.value.find((event) => Number(event.id) === Number(eventId.value))
@@ -292,18 +326,73 @@ async function submitBooking() {
 async function loadMyBookings() {
   statusLoading.value = true;
   statusError.value = "";
-
+  withdrawNotice.value = "";
   try {
     const response = await venuesApi.getMyBookings();
     myBookings.value = response.data;
   } catch (error) {
-    myBookings.value = []; // Clear outdated booking statuses
-
+    myBookings.value = []; // Never display outdated statuses after a failed refresh.
     statusError.value =
-      error.response?.data?.error ||
-      "Unable to load your booking requests.";
+      error.response?.data?.error || "Unable to load your booking requests.";
   } finally {
     statusLoading.value = false;
+  }
+}
+
+function openWithdrawConfirmation(booking) {
+  if (booking.status !== "pending" || withdrawingId.value !== null) return;
+  withdrawErrors.value = { ...withdrawErrors.value, [booking.id]: "" };
+  withdrawNotice.value = "";
+  bookingToWithdraw.value = booking;
+}
+
+function cancelWithdrawal() {
+  if (withdrawingId.value !== null) return;
+  bookingToWithdraw.value = null;
+}
+
+async function confirmWithdrawal() {
+  const booking = bookingToWithdraw.value;
+  if (!booking || withdrawingId.value !== null) return;
+  if (booking.status !== "pending") {
+    bookingToWithdraw.value = null;
+    return;
+  }
+
+  withdrawingId.value = booking.id;
+  withdrawErrors.value = { ...withdrawErrors.value, [booking.id]: "" };
+  try {
+    // The server decides whether the booking is still pending and owned by us.
+    await venuesApi.withdrawBooking(booking.id);
+    bookingToWithdraw.value = null;
+    // Re-fetch the authoritative state; do not optimistically mark withdrawn.
+    await loadMyBookings();
+    if (!statusError.value) {
+      withdrawNotice.value = "Booking request withdrawn successfully.";
+    }
+  } catch (error) {
+    bookingToWithdraw.value = null;
+    const code = error.response?.status;
+    const serverMessage = error.response?.data?.error;
+    const message = code === 400 || code === 409
+      ? "This booking request has already been decided or can no longer be withdrawn."
+      : code === 403
+        ? "You are not allowed to withdraw this booking request."
+        : serverMessage || "Withdrawal did not go through. Please try again.";
+    withdrawErrors.value = { ...withdrawErrors.value, [booking.id]: message };
+    // A decision may have happened since the list was loaded. Re-fetch, but
+    // keep the withdrawal error visible even if the refresh succeeds.
+    if (code === 400 || code === 409 || code === 403) {
+      try {
+        const response = await venuesApi.getMyBookings();
+        myBookings.value = response.data;
+      } catch (_) {
+        myBookings.value = [];
+        statusError.value = "Unable to refresh booking status. Please try again.";
+      }
+    }
+  } finally {
+    withdrawingId.value = null;
   }
 }
 
@@ -399,6 +488,14 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary, #6
 .status-pill.approved { background: #d3f5e3; color: #1e6b47; }
 .status-pill.rejected { background: #fde8ee; color: #a12b47; }
 .status-pill.withdrawn { background: #e9e5fb; color: #4b3fa0; }
+.booking-actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
+.withdraw-btn { background: #a12b47; }
+.withdraw-btn:hover:not(:disabled) { background: #86223b; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 1000; background: rgba(28, 22, 54, .55); display: flex; align-items: center; justify-content: center; padding: 1rem; }
+.confirmation-dialog { width: min(100%, 430px); padding: 1.5rem; background: #fff; border-radius: 14px; box-shadow: 0 16px 45px rgba(0, 0, 0, .2); }
+.confirmation-dialog h3 { margin: 0 0 .75rem; color: var(--text, #2d2a4a); }
+.confirmation-dialog p { line-height: 1.5; }
+.confirmation-actions { display: flex; justify-content: flex-end; gap: .75rem; margin-top: 1.25rem; }
 .rejection-reason { margin: 1rem 0 0; padding: .75rem; border-radius: 8px; background: #fde8ee; color: #a12b47; font-size: .875rem; }
 @media (max-width: 700px) {
   .form-grid, .requirements-grid, .booking-details { grid-template-columns: 1fr; }

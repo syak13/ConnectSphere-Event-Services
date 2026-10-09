@@ -698,3 +698,278 @@ def test_status_ac7_failed_request_returns_error(
 
         finally:
             app.config["PROPAGATE_EXCEPTIONS"] = original_propagate
+
+
+# --------------------------------------------------------------------------
+# User Story: Withdraw a Pending Venue Booking Request
+# --------------------------------------------------------------------------
+
+
+# AC1:
+# Given a pending booking request, when I withdraw it,
+# then it no longer appears in Venue Staff's pending queue
+# and its status reflects the withdrawal.
+
+def test_withdraw_ac1_pending_booking_removed_from_staff_queue(client, ctx):
+    res = submit(client, ctx, [entry(ctx.hall_a)])
+    assert res.status_code == 201
+
+    booking_id = res.get_json()[0]["id"]
+
+    withdraw_res = client.post(
+        f"{BASE}/bookings/{booking_id}/withdraw",
+        headers=ctx.coord,
+    )
+
+    assert withdraw_res.status_code == 200
+    assert withdraw_res.get_json()["status"] == "withdrawn"
+
+    # Check that Venue Staff can no longer see it in the pending queue.
+    pending_res = client.get(
+        f"{BASE}/bookings/pending",
+        headers=ctx.staff,
+    )
+
+    assert pending_res.status_code == 200
+    assert booking_id not in [
+        booking["id"] for booking in pending_res.get_json()
+    ]
+
+    # Coordinator should still see the request with withdrawn status.
+    my_res = client.get(
+        f"{BASE}/bookings/my",
+        headers=ctx.coord,
+    )
+
+    assert my_res.status_code == 200
+
+    booking = next(
+        b for b in my_res.get_json()
+        if b["id"] == booking_id
+    )
+
+    assert booking["status"] == "withdrawn"
+
+
+# AC2:
+# Given I have a pending request, when I choose to withdraw it,
+# then I am asked to confirm first.
+
+# This is a frontend acceptance criterion.
+# The backend test verifies that simply viewing the request
+# does not withdraw it. The confirmation dialog itself
+# must be tested in Vue.
+
+def test_withdraw_ac2_viewing_booking_does_not_withdraw(client, ctx):
+    res = submit(client, ctx, [entry(ctx.hall_a)])
+    assert res.status_code == 201
+
+    booking_id = res.get_json()[0]["id"]
+
+    view_res = client.get(
+        f"{BASE}/bookings/my",
+        headers=ctx.coord,
+    )
+
+    assert view_res.status_code == 200
+
+    booking = next(
+        b for b in view_res.get_json()
+        if b["id"] == booking_id
+    )
+
+    assert booking["status"] == "pending"
+
+    db.session.expire_all()
+    record = db.session.get(VenueBooking, booking_id)
+
+    assert record.status == "pending"
+
+
+# AC3:
+# Given my request has already been approved or rejected,
+# when I view it, then the withdraw option is not available.
+
+# Button visibility must be tested in Vue.
+# This backend test verifies that withdrawal is rejected
+# for both approved and rejected bookings.
+
+@pytest.mark.parametrize(
+    "status",
+    ["approved", "rejected"],
+)
+def test_withdraw_ac3_decided_booking_cannot_be_withdrawn(
+    client,
+    ctx,
+    status,
+):
+    add_booking(ctx, ctx.hall_a, status)
+
+    booking_id = all_bookings()[0].id
+
+    withdraw_res = client.post(
+        f"{BASE}/bookings/{booking_id}/withdraw",
+        headers=ctx.coord,
+    )
+
+    assert withdraw_res.status_code == 400
+
+    db.session.expire_all()
+    record = db.session.get(VenueBooking, booking_id)
+
+    assert record.status == status
+
+
+# AC4:
+# Given Venue Staff approve or reject my request just before
+# I confirm the withdrawal, when I confirm, then the withdrawal
+# is not applied and I am told the request has already been decided.
+
+@pytest.mark.parametrize(
+    "decision, expected_status",
+    [
+        ("approve", "approved"),
+        ("reject", "rejected"),
+    ],
+)
+def test_withdraw_ac4_staff_decision_before_confirmation(
+    client,
+    ctx,
+    decision,
+    expected_status,
+):
+    res = submit(client, ctx, [entry(ctx.hall_a)])
+    assert res.status_code == 201
+
+    booking_id = res.get_json()[0]["id"]
+
+    # Venue Staff decides before the coordinator confirms withdrawal.
+    decision_res = client.post(
+        f"{BASE}/bookings/{booking_id}/{decision}",
+        headers=ctx.staff,
+        json={"reason": "Staff decision"},
+    )
+
+    assert decision_res.status_code == 200
+
+    # Coordinator now tries to withdraw the same booking.
+    withdraw_res = client.post(
+        f"{BASE}/bookings/{booking_id}/withdraw",
+        headers=ctx.coord,
+    )
+
+    assert withdraw_res.status_code == 400
+    assert "pending" in withdraw_res.get_json()["error"].lower() \
+        or "decided" in withdraw_res.get_json()["error"].lower()
+
+    db.session.expire_all()
+    record = db.session.get(VenueBooking, booking_id)
+
+    assert record.status == expected_status
+
+
+# AC5:
+# Given I confirm a withdrawal, when the system fails to process it,
+# then I am told it did not go through and the request stays pending
+# in Venue Staff's queue.
+
+def test_withdraw_ac5_failed_withdrawal_keeps_booking_pending(
+    client,
+    ctx,
+    monkeypatch,
+):
+    from app.venues.services import booking as booking_service
+
+    res = submit(client, ctx, [entry(ctx.hall_a)])
+    assert res.status_code == 201
+
+    booking_id = res.get_json()[0]["id"]
+
+    # Simulate a withdrawal service failure.
+    def fail_withdrawal(record, user_id):
+        raise ValueError("Withdrawal could not be processed")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            booking_service,
+            "withdraw_booking_request",
+            fail_withdrawal,
+        )
+
+        withdraw_res = client.post(
+            f"{BASE}/bookings/{booking_id}/withdraw",
+            headers=ctx.coord,
+        )
+
+    assert withdraw_res.status_code == 400
+    assert "error" in withdraw_res.get_json()
+    assert "could not be processed" in withdraw_res.get_json()["error"]
+
+    # The booking must remain pending.
+    db.session.expire_all()
+    record = db.session.get(VenueBooking, booking_id)
+
+    assert record.status == "pending"
+
+    # Venue Staff should still see the booking.
+    pending_res = client.get(
+        f"{BASE}/bookings/pending",
+        headers=ctx.staff,
+    )
+
+    assert pending_res.status_code == 200
+    assert booking_id in [
+        booking["id"] for booking in pending_res.get_json()
+    ]
+
+
+# AC6:
+# Given a booking request for an event I am not coordinating,
+# when I view it, then the withdraw button is not shown to me.
+
+# Button visibility is tested in Vue.
+# This backend test verifies that a different coordinator
+# cannot withdraw someone else's booking.
+
+def test_withdraw_ac6_other_coordinator_cannot_withdraw(
+    client,
+    ctx,
+    make_user,
+    auth_header,
+):
+    res = submit(client, ctx, [entry(ctx.hall_a)])
+    assert res.status_code == 201
+
+    booking_id = res.get_json()[0]["id"]
+
+    make_user(
+        "other-withdraw-coord@test.com",
+        ["event_coordinator"],
+    )
+
+    other_coord = auth_header("other-withdraw-coord@test.com")
+
+    withdraw_res = client.post(
+        f"{BASE}/bookings/{booking_id}/withdraw",
+        headers=other_coord,
+    )
+
+    assert withdraw_res.status_code == 400
+    assert "not authorised" in withdraw_res.get_json()["error"].lower()
+
+    db.session.expire_all()
+    record = db.session.get(VenueBooking, booking_id)
+
+    assert record.status == "pending"
+
+    # Other coordinator should not see this booking in their list.
+    my_res = client.get(
+        f"{BASE}/bookings/my",
+        headers=other_coord,
+    )
+
+    assert my_res.status_code == 200
+    assert all(
+        b["id"] != booking_id
+        for b in my_res.get_json()
+    )
