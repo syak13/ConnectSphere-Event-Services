@@ -19,4 +19,6 @@ export default {
 
   // Submit one booking request with one or more venues
   submitBooking: (payload) => apiClient.post("/venues/bookings", payload),
+
+  getMyBookings: () => apiClient.get("/venues/bookings/my"),
 };

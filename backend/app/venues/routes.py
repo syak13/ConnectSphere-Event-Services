@@ -4,6 +4,8 @@ from datetime import date, datetime, time
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
+from app.extensions import db
+
 from app.auth.decorators import roles_required
 from app.models.event import Event
 from app.models.user import User
@@ -393,3 +395,39 @@ def reject_booking(booking_id):
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(result.to_dict()), 200
+
+@venues_bp.get("/bookings/my")
+@roles_required("event_coordinator")
+def get_my_booking_requests():
+    user = _current_user()
+
+    bookings = (
+        VenueBooking.query
+        .filter_by(requested_by=user.id)
+        .order_by(VenueBooking.created_at.desc())
+        .all()
+    )
+
+    results = []
+
+    for booking in bookings:
+        event = db.session.get(Event, booking.event_id)
+        venue = db.session.get(Venue, booking.venue_id)
+
+        results.append({
+            "id": booking.id,
+            "eventId": booking.event_id,
+            "eventName": event.name if event else None,
+            "venueId": booking.venue_id,
+            "venueName": venue.name if venue else None,
+            "status": booking.status,
+            "startDatetime": booking.start_datetime.isoformat(),
+            "endDatetime": booking.end_datetime.isoformat(),
+            "createdAt": (
+                booking.created_at.isoformat()
+                if booking.created_at else None
+            ),
+            "decisionReason": booking.decision_reason,
+        })
+
+    return jsonify(results), 200
