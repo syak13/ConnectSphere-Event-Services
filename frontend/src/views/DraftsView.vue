@@ -38,9 +38,13 @@ async function load() {
 
   try {
     const { data } = await eventsApi.listDrafts();
-    drafts.value = data;
+
+    drafts.value = Array.isArray(data)
+      ? data.filter((draft) => draft.status === "draft")
+      : [];
   } catch (e) {
-    error.value = e.response?.data?.error || "Could not load saved drafts.";
+    error.value =
+      e.response?.data?.error || "Could not load saved drafts.";
   }
 }
 
@@ -69,6 +73,13 @@ async function submitDraft(id) {
 async function deleteDraft(id) {
   error.value = "";
 
+  const draft = drafts.value.find((item) => item.id === id);
+
+  if (!draft || draft.status !== "draft") {
+    error.value = "This item is no longer a draft and cannot be deleted.";
+    return;
+  }
+
   const confirmed = await confirm("Delete this draft? This action cannot be undone.");
   if (!confirmed) return;
 
@@ -76,7 +87,20 @@ async function deleteDraft(id) {
     await eventsApi.deleteDraft(id);
     await load();
   } catch (e) {
-    error.value = e.response?.data?.error || "Could not delete this draft.";
+    console.error("Delete draft failed:", {
+      status: e.response?.status,
+      url: e.config?.url,
+      method: e.config?.method,
+      response: e.response?.data,
+      message: e.message,
+    });
+
+    error.value =
+      e.response?.data?.error ||
+      e.response?.data?.message ||
+      `Could not delete this draft (${
+        e.response?.status || "unknown error"
+      }).`;
   }
 }
 
