@@ -15,6 +15,8 @@ import PlanningView from "../views/PlanningView.vue";
 import CoordinatorCalendar from "../components/CoordinatorCalendar.vue";
 import VenueBookingRequestView from "../views/VenueBookingRequestView.vue";
 import VenueSearchView from "../views/VenueSearchView.vue";
+import VenueCatalogueView from "../views/VenueCatalogueView.vue";
+import VenueAvailabilityView from "../views/VenueAvailabilityView.vue";
 
 
 const routes = [
@@ -103,7 +105,7 @@ const routes = [
     component: VenueSearchView,
     meta: { requiresAuth: true, roles: ["event_coordinator"] },
   },
-  
+
   {
     path: "/venue-booking-request",
     name: "venue-booking-request",
@@ -112,6 +114,20 @@ const routes = [
       requiresAuth: true,
       roles: ["event_coordinator"],
     },
+  },
+
+  {
+    path: "/venues/availability",
+    name: "venue-availability",
+    component: VenueAvailabilityView,
+    meta: { requiresAuth: true, roles: ["venue_staff", "event_coordinator"] },
+  },
+
+  {
+    path: "/venues",
+    name: "venue-catalogue",
+    component: VenueCatalogueView,
+    meta: { requiresAuth: true, roles: ["venue_staff", "event_coordinator"] },
   },
 ];
 

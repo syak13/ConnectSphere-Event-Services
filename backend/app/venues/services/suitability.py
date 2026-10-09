@@ -14,8 +14,8 @@ def check_suitability(event: Event, venue: Venue) -> list[str]:
         )
 
     if event.required_layout:
-        supported = venue.supported_layouts or []
-        if event.required_layout not in supported:
+        supported = {str(layout).strip().lower() for layout in (venue.supported_layouts or [])}
+        if event.required_layout.strip().lower() not in supported:
             flags.append(f"Venue does not support the required layout: {event.required_layout}")
 
     if event.accessibility_needs and event.accessibility_needs.lower() not in ("none", "n/a", ""):

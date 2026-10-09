@@ -22,8 +22,12 @@ class Venue(db.Model):
 
     id = db.Column(db.BigInteger, primary_key=True)
     name = db.Column(db.String(255), nullable=False)
-    location = db.Column(db.String(255), nullable=False)
+    # Story: only name and capacity are mandatory, so location is optional.
+    # NOTE: if database/schema.sql declares location NOT NULL, relax it there too.
+    location = db.Column(db.String(255), nullable=True)
     capacity = db.Column(db.Integer, nullable=False)
+    description = db.Column(db.Text, nullable=True)
+    created_by = db.Column(db.BigInteger, db.ForeignKey("users.id"), nullable=True)
 
     accessibility_info = db.Column(db.Text, nullable=True)
     operating_hours = db.Column(db.String(255), nullable=True)
@@ -54,6 +58,20 @@ class Venue(db.Model):
         creator=lambda feature_name: VenueAccessibilityFeature(feature_name=feature_name),
     )
 
+    # Supported room layouts (classroom, theatre, ...) live in venue_layouts, the
+    # same table-backed pattern as facilities and accessibility features.
+    layout_entries = db.relationship(
+        "VenueLayout",
+        back_populates="venue",
+        cascade="all, delete-orphan",
+        order_by="VenueLayout.layout_name",
+    )
+    supported_layouts = association_proxy(
+        "layout_entries",
+        "layout_name",
+        creator=lambda layout_name: VenueLayout(layout_name=layout_name),
+    )
+
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=utcnow)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
@@ -76,10 +94,14 @@ class Venue(db.Model):
             "name": self.name,
             "location": self.location,
             "capacity": self.capacity,
+            "description": self.description,
             "accessibilityInfo": self.accessibility_info,
             "accessibilityFeatures": list(self.accessibility_features or []),
             "facilities": list(self.facilities or []),
+            "supportedLayouts": list(self.supported_layouts or []),
             "operatingHours": self.operating_hours,
+            "setupMinutes": self.setup_minutes,
+            "turnaroundMinutes": self.turnaround_minutes,
             "isActive": self.is_active,
         }
 
@@ -110,6 +132,21 @@ class VenueAccessibilityFeature(db.Model):
     )
     feature_name = db.Column(db.String(150), nullable=False)
     venue = db.relationship("Venue", back_populates="accessibility_entries")
+
+
+class VenueLayout(db.Model):
+    __tablename__ = "venue_layouts"
+    __table_args__ = (
+        db.UniqueConstraint("venue_id", "layout_name", name="uq_venue_layout"),
+    )
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    venue_id = db.Column(
+        VENUE_ID_TYPE, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False
+    )
+    layout_name = db.Column(db.String(100), nullable=False)
+    max_capacity = db.Column(db.Integer, nullable=True)
+    venue = db.relationship("Venue", back_populates="layout_entries")
 
 
 class VenueUnavailability(db.Model):
@@ -183,6 +220,9 @@ class VenueBooking(db.Model):
         default=utcnow,
         onupdate=utcnow,
     )
+
+    # Was missing: availability.py and catalogue.py use `booking.event`.
+    event = db.relationship("Event", backref="venue_bookings")
 
     def to_dict(self):
         return {
