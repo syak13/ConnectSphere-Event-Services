@@ -17,6 +17,7 @@ from werkzeug.security import generate_password_hash  # noqa: E402
 from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models.user import Organisation, Role, User  # noqa: E402
+from app.models.venue import Venue  # noqa: E402
 
 app = create_app(os.getenv("FLASK_ENV", "development"))
 
@@ -29,6 +30,18 @@ TEST_USERS = [
     {"name": "Vince Venue", "email": "venue@example.com", "roles": ["venue_staff"]},
     {"name": "Tara TechSupport", "email": "techsupport@example.com", "roles": ["technical_support_staff"]},
     {"name": "Alex Attendee", "email": "attendee@example.com", "roles": ["attendee"]},
+]
+
+TEST_VENUES = [
+    {"name": "Main Auditorium", "location": "North Campus", "capacity": 300,
+     "accessibility_info": "Wheelchair accessible", "operating_hours": "08:00-22:00",
+     "setup_minutes": 30, "turnaround_minutes": 45},
+    {"name": "Seminar Room A", "location": "North Campus", "capacity": 40,
+     "accessibility_info": None, "operating_hours": "08:00-22:00",
+     "setup_minutes": 15, "turnaround_minutes": 15},
+    {"name": "Banquet Hall", "location": "South Campus", "capacity": 150,
+     "accessibility_info": "Step-free entrance", "operating_hours": "08:00-23:00",
+     "setup_minutes": 60, "turnaround_minutes": 60},
 ]
 
 with app.app_context():
@@ -52,5 +65,13 @@ with app.app_context():
         db.session.add(user)
         created += 1
 
+    venues_created = 0
+    for entry in TEST_VENUES:
+        if Venue.query.filter_by(name=entry["name"]).first():
+            continue
+        db.session.add(Venue(**entry))
+        venues_created += 1
+
     db.session.commit()
     print(f"Seeded {created} new test user(s). Password for all: '{DEFAULT_PASSWORD}'")
+    print(f"Seeded {venues_created} new sample venue(s).")

@@ -221,8 +221,11 @@ CREATE TABLE venues (
     operating_hours     VARCHAR(255) NULL,
     is_active           TINYINT(1) NOT NULL DEFAULT 1,
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    updated_at          DATETIME NOT NULL DEFAULT 
+    CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    setup_minutes       INT UNSIGNED NOT NULL DEFAULT 0,
+    turnaround_minutes  INT UNSIGNED NOT NULL DEFAULT 0)
+    ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE venue_layouts (
     id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -251,8 +254,8 @@ CREATE TABLE venue_unavailability (
     venue_id        BIGINT UNSIGNED NOT NULL,
     start_datetime  DATETIME NOT NULL,
     end_datetime    DATETIME NOT NULL,
-    reason          VARCHAR(255) NOT NULL,
-    created_by      BIGINT UNSIGNED NOT NULL,
+    reason          VARCHAR(255) NULL,
+    created_by      BIGINT UNSIGNED NULL,
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_vu_venue FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE,
     CONSTRAINT fk_vu_creator FOREIGN KEY (created_by) REFERENCES users(id),
@@ -285,6 +288,26 @@ CREATE TABLE venue_bookings (
     INDEX idx_vb_venue_dates (venue_id, start_datetime, end_datetime),
     INDEX idx_vb_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+
+-- ---------------------------------------------------------------------
+-- Venue Availability Flags: raised when a venue's availability changes in
+-- a way that affects an already-planned event (Week 7 change #2)
+-- ---------------------------------------------------------------------
+
+CREATE TABLE venue_availability_flags (
+    id           BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id     BIGINT UNSIGNED NOT NULL,
+    venue_id     BIGINT UNSIGNED NOT NULL,
+    reason       VARCHAR(255) NULL,
+    resolved     TINYINT(1) NOT NULL DEFAULT 0,
+    created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    resolved_at  DATETIME NULL,
+    CONSTRAINT fk_vaf_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+    CONSTRAINT fk_vaf_venue FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE,
+    INDEX idx_vaf_event (event_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 
 -- ---------------------------------------------------------------------
 -- Equipment Availability Checking / Reservation (catalogue side)

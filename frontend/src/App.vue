@@ -8,6 +8,8 @@
         <router-link v-if="auth.hasRole('event_coordinator')" to="/review">Review Queue</router-link>
         <router-link v-if="auth.hasRole('event_coordinator')" to="/planning">Planning View</router-link>
         <router-link v-if="auth.hasRole('event_coordinator')" to="/calendar">My Calendar</router-link>
+        <router-link v-if="auth.hasRole('event_coordinator')" to="/venue-booking-request">Venue Booking</router-link>
+        <router-link v-if="auth.hasRole('event_coordinator')" to="/venues/search">Venue Search</router-link>
         <span class="spacer" />
         <span class="user-name">{{ auth.user?.name }}</span>
         <button class="logout" @click="handleLogout">Logout</button>
@@ -17,12 +19,14 @@
     <main>
       <router-view />
     </main>
+    <ConfirmDialog />
   </div>
 </template>
 
 <script setup>
 import { useRouter } from "vue-router";
 import { useAuthStore } from "./stores/auth";
+import ConfirmDialog from './components/ConfirmDialog.vue';
 
 const auth = useAuthStore();
 const router = useRouter();

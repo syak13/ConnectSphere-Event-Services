@@ -1,4 +1,8 @@
-import { createRouter, createWebHistory } from "vue-router";
+import {
+  createRouter,
+  createWebHistory,
+} from "vue-router";
+
 import { useAuthStore } from "../stores/auth";
 
 import LoginView from "../views/LoginView.vue";
@@ -9,81 +13,138 @@ import ReviewQueueView from "../views/ReviewQueueView.vue";
 import EventDetailView from "../views/EventDetailView.vue";
 import PlanningView from "../views/PlanningView.vue";
 import CoordinatorCalendar from "../components/CoordinatorCalendar.vue";
+import VenueBookingRequestView from "../views/VenueBookingRequestView.vue";
+import VenueSearchView from "../views/VenueSearchView.vue";
 
 
 const routes = [
-  { path: "/login", name: "login", component: LoginView },
-
-  { path: "/", name: "dashboard", component: DashboardView, meta: { requiresAuth: true } },
-  { path: "/drafts", name: "drafts", component: DraftsView, meta: { requiresAuth: true } },
-  { path: "/events/new", name: "event-create", component: EventCreateView, meta: { requiresAuth: true } },
-  { path: "/review", name: "review-queue", component: ReviewQueueView, meta: { requiresAuth: true } },
-  { path: "/events/:id", name: "event-detail", component: EventDetailView, meta: { requiresAuth: true } },
-  // Added: Coordinators view unassigned events for planning visibility
-  { path: "/planning", name: "planning", component: PlanningView, meta: { requiresAuth: true } },
-  // Added: previous coordinator retains read-only visibility after reassignment
-  { path: "/calendar", name: "calendar", component: CoordinatorCalendar, meta: { requiresAuth: true } },
-
+  {
+    path: "/login",
+    name: "login",
+    component: LoginView,
+  },
 
   {
     path: "/",
     name: "dashboard",
     component: DashboardView,
-    meta: { requiresAuth: true },
+    meta: {
+      requiresAuth: true,
+    },
   },
 
   {
     path: "/drafts",
     name: "drafts",
     component: DraftsView,
-    meta: { requiresAuth: true },
+    meta: {
+      requiresAuth: true,
+    },
   },
 
   {
     path: "/events/new",
     name: "event-create",
     component: EventCreateView,
-    meta: { requiresAuth: true },
+    meta: {
+      requiresAuth: true,
+    },
   },
 
   {
     path: "/events/drafts/:id/edit",
     name: "edit-draft",
     component: EventCreateView,
-    meta: { requiresAuth: true, roles: ["event_organiser"] },
+    meta: {
+      requiresAuth: true,
+      roles: ["event_organiser"],
+    },
   },
 
   {
     path: "/review",
     name: "review-queue",
     component: ReviewQueueView,
-    meta: { requiresAuth: true },
+    meta: {
+      requiresAuth: true,
+    },
   },
 
   {
     path: "/events/:id",
     name: "event-detail",
     component: EventDetailView,
-    meta: { requiresAuth: true },
+    meta: {
+      requiresAuth: true,
+    },
   },
 
+  {
+    path: "/planning",
+    name: "planning",
+    component: PlanningView,
+    meta: {
+      requiresAuth: true,
+    },
+  },
+
+  {
+    path: "/calendar",
+    name: "calendar",
+    component: CoordinatorCalendar,
+    meta: {
+      requiresAuth: true,
+    },
+  },
+
+  {
+    path: "/venues/search",
+    name: "venue-search",
+    component: VenueSearchView,
+    meta: { requiresAuth: true, roles: ["event_coordinator"] },
+  },
+  
+  {
+    path: "/venue-booking-request",
+    name: "venue-booking-request",
+    component: VenueBookingRequestView,
+    meta: {
+      requiresAuth: true,
+      roles: ["event_coordinator"],
+    },
+  },
 ];
+
 
 const router = createRouter({
   history: createWebHistory(),
   routes,
 });
 
+
 router.beforeEach((to) => {
   const auth = useAuthStore();
 
-  if (to.meta.requiresAuth && !auth.isAuthenticated) {
-    return { name: "login" };
+  if (
+    to.meta.requiresAuth &&
+    !auth.isAuthenticated
+  ) {
+    return {
+      name: "login",
+    };
   }
 
-  if (to.meta.roles && !to.meta.roles.some((role) => auth.hasRole(role))) {
-    return { name: "dashboard" };
+  if (
+    to.meta.roles &&
+    !to.meta.roles.some(
+      (role) => auth.hasRole(role)
+    )
+  ) {
+    return {
+      name: "dashboard",
+    };
   }
 });
+
 
 export default router;

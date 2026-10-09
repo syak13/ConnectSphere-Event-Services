@@ -101,11 +101,13 @@
 import { onMounted, reactive, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import eventsApi from "../api/events";
+import { useConfirm } from "../composables/useConfirm";
 
 const route = useRoute();
 const router = useRouter();
 const error = ref("");
 const todayString = new Date().toISOString().split("T")[0];
+const { confirm } = useConfirm();
 
 const draftId = route.params.id;
 const isEditMode = Boolean(draftId);
@@ -222,6 +224,11 @@ async function submit() {
   if (!validateDate()) {
     return;
   }
+
+  const confirmed = await confirm(
+    "Submit this event request for review? You won't be able to edit it directly afterwards."
+  );
+  if (!confirmed) return;
 
   try {
     const payload = sanitizePayload(form);

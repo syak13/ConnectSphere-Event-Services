@@ -11,6 +11,25 @@
       <strong>Unassigned.</strong> No Coordinator is currently assigned to this event.
     </div>
 
+    <div v-if="priorDecisions.length" class="card history">
+      <h3 class="section-title">Previous Submission History</h3>
+      <p class="notice-inline">
+        This is resubmission #{{ priorDecisions.length + 1 }}. Earlier attempts are shown below for reference.
+      </p>
+      <ul class="thread-list">
+        <li v-for="decision in priorDecisions" :key="decision.eventId" class="thread-item">
+          <div class="thread-message" :class="decision.outcome">
+            <span class="thread-meta">
+              {{ decision.outcome === "approved" ? "Approved" : "Rejected" }} by
+              {{ decision.coordinatorName || `Coordinator #${decision.coordinatorId}` }}
+              · {{ formatDate(decision.timestamp) }}
+            </span>
+            <p v-if="decision.reason">{{ decision.reason }}</p>
+          </div>
+        </li>
+      </ul>
+    </div>
+
     <!-- Event summary -->
     <div class="card summary">
       <div class="title-row">
@@ -187,12 +206,22 @@
     </section>
 
     <!-- Organiser Actions: Event Review and Approval -->
-    <section v-if="isOwningOrganiser && canRespondToClarifications">
-      <template v-if="openClarifications.length">
+    <section v-if="isOwningOrganiser">
+      <template v-if="canRespondToClarifications && openClarifications.length">
         <h3 class="section-title">Clarification Requests Awaiting Your Response</h3>
         <div v-for="item in openClarifications" :key="item.reviewId" class="action-block">
           <p class="request-question">{{ item.request.comments }}</p>
           <span class="thread-meta">Asked {{ formatDate(item.request.createdAt) }}</span>
+
+          <label class="field-row">
+            Your response
+            <div>
+              <textarea
+              v-model="openResponseForms[item.reviewId].comments"
+              placeholder="Explain what you changed, or answer the coordinator's question"
+            ></textarea>
+            </div>
+          </label>
 
           <template v-if="item.request.editableFields?.length">
             <div
@@ -224,11 +253,6 @@
             The coordinator hasn't opened any fields for editing on this request. You can still respond in words.
           </p>
 
-          <textarea
-              v-model="openResponseForms[item.reviewId].comments"
-              placeholder="Explain what you changed, or answer the coordinator's question"
-            ></textarea>
-
           <p v-if="respondErrors[item.reviewId]" class="field-error">{{ respondErrors[item.reviewId] }}</p>
           <div class="actions">
             <button class="btn btn-primary" @click="respondToItem(item.reviewId)">Send Response</button>
@@ -236,10 +260,70 @@
         </div>
       </template>
 
-      <div v-if="event.status === 'rejected'" class="action-block">
+      <div v-if="event.status === 'rejected' && event.canResubmit" class="action-block">
+        <h3 class="block-title">Revise and Resubmit</h3>
+        <p class="notice-inline">Update the details below, then resubmit for review.</p>
+
+        <label class="field-row">
+          Event name
+          <p></p>
+          <input v-model="revisionForm.name" />
+        </label>
+        <label class="field-row">
+          Purpose
+          <p></p>
+          <input v-model="revisionForm.purpose" />
+        </label>
+        <label class="field-row">
+          Description
+          <p></p>
+          <textarea v-model="revisionForm.description"></textarea>
+        </label>
+        <label class="field-row">
+          Proposed date
+          <p></p>
+          <input v-model="revisionForm.proposed_date" type="date" />
+        </label>
+        <label class="field-row">
+          Proposed time
+          <p></p>
+          <input v-model="revisionForm.proposed_time" type="time" />
+        </label>
+        <label class="field-row">
+          Expected attendance
+          <p></p>
+          <input v-model.number="revisionForm.expected_attendance" type="number" min="1" />
+        </label>
+        <label class="field-row">
+          Equipment Required
+          <p></p>
+          <input v-model.number="revisionForm.capacity_needed" type="number" min="1" />
+        </label>
+        <label class="field-row">
+          Venue Required
+          <p></p>
+          <input v-model="revisionForm.required_layout" />
+        </label>
+        <label class="field-row">
+          Accessibility needs
+          <p></p>
+          <textarea v-model="revisionForm.accessibility_needs"></textarea>
+        </label>
+        <label class="checkbox-option">
+          <input v-model="revisionForm.registration_required" type="checkbox" />
+          Registration required
+        </label>
+
+        <p v-if="revisionError" class="field-error">{{ revisionError }}</p>
         <div class="actions">
-          <button class="btn btn-primary" @click="resubmit">Revise &amp; Resubmit</button>
+          <button class="btn btn-primary" @click="resubmit">Resubmit for Review</button>
         </div>
+      </div>
+      <div v-else-if="event.status === 'rejected' && !event.canResubmit" class="action-block">
+        <h3 class="block-title">Revise and Resubmit</h3>
+        <p class="notice-inline">
+          This request has already been resubmitted. Open the latest resubmission from your Dashboard to see its status.
+        </p>
       </div>
     </section>
   </div>
@@ -252,6 +336,7 @@ import { useRoute, useRouter } from "vue-router";
 import { useAuthStore } from "../stores/auth";
 import eventsApi from "../api/events";
 import usersApi from "../api/users";
+import { useConfirm } from "../composables/useConfirm";
 
 const route = useRoute();
 const router = useRouter();
@@ -268,6 +353,7 @@ const reviewHistory = ref([]);
 
 const confirmState = ref(null); // { message, onConfirm, onCancel }
 const actionError = ref("");
+const { confirm } = useConfirm();
 
 const EDITABLE_FIELD_OPTIONS = [
   { key: "name", label: "Event name", type: "text" },
@@ -308,6 +394,21 @@ const openClarifications = computed(() =>
   clarificationThread.value.filter((item) => item.response === null && !item.withdrawn)
 );
 
+const priorDecisions = ref([]);
+const revisionForm = reactive({
+  name: "",
+  purpose: "",
+  description: "",
+  proposed_date: "",
+  proposed_time: "",
+  expected_attendance: null,
+  capacity_needed: null,
+  required_layout: "",
+  accessibility_needs: "",
+  registration_required: false,
+});
+const revisionError = ref("");
+
 const formatFieldNames = (keys) =>
   (keys || []).map((k) => EDITABLE_FIELD_OPTIONS.find((o) => o.key === k)?.label || k).join(", ");
 
@@ -316,14 +417,17 @@ const formatDate = (iso) => (iso ? new Date(iso).toLocaleString() : "");
 async function load() {
   const { data } = await eventsApi.getEvent(route.params.id);
   event.value = data;
+  initRevisionForm();
 
   try {
     const { data: outcome } = await eventsApi.getOutcome(route.params.id);
     reviewHistory.value = outcome.reviewHistory || [];
     clarificationThread.value = outcome.clarificationThread || [];
+    priorDecisions.value = outcome.priorDecisions || [];
   } catch (e) {
     reviewHistory.value = [];
     clarificationThread.value = [];
+    priorDecisions.value = [];
   }
 
   clarificationThread.value.filter((item) => item.response === null).forEach(ensureResponseForm);
@@ -365,6 +469,20 @@ function ensureResponseForm(item) {
     fields[key] = source[key] ?? (key === "registration_required" ? false : "");
   });
   openResponseForms[item.reviewId] = { comments: "", fields };
+}
+
+function initRevisionForm() {
+  if (event.value?.status !== "rejected") return;
+  revisionForm.name = event.value.name || "";
+  revisionForm.purpose = event.value.purpose || "";
+  revisionForm.description = event.value.description || "";
+  revisionForm.proposed_date = event.value.proposedDate || "";
+  revisionForm.proposed_time = event.value.proposedTime || "";
+  revisionForm.expected_attendance = event.value.expectedAttendance;
+  revisionForm.capacity_needed = event.value.venueRequirements?.capacityNeeded;
+  revisionForm.required_layout = event.value.venueRequirements?.requiredLayout;
+  revisionForm.accessibility_needs = event.value.venueRequirements?.accessibilityNeeds;
+  revisionForm.registration_required = event.value.registrationRequired;
 }
 
 function requestActionWithConfirmation(callWithConfirmed) {
@@ -457,6 +575,12 @@ async function cancelEvent() {
 
 async function deleteClarificationRequest(reviewId) {
   actionError.value = "";
+
+  const confirmed = await confirm(
+    "Delete this clarification request? The organiser will no longer be able to respond to it."
+  );
+  if (!confirmed) return;
+
   try {
     await eventsApi.deleteClarification(event.value.id, reviewId);
     await load();
@@ -466,6 +590,11 @@ async function deleteClarificationRequest(reviewId) {
 }
 
 async function revertToPlanning() {
+  const confirmed = await confirm(
+    "Revert this confirmed event back to Planning? This should only be done for a major change."
+  );
+  if (!confirmed) return;
+
   await eventsApi.changeStatus(event.value.id, "planning", comment.value);
   comment.value = "";
   await load();
@@ -473,15 +602,29 @@ async function revertToPlanning() {
 
 async function reassign() {
   if (!newCoordinatorId.value) return;
+
+  const confirmed = await confirm("Reassign this event to the selected coordinator?");
+  if (!confirmed) return;
+
   await eventsApi.reassign(event.value.id, newCoordinatorId.value);
   newCoordinatorId.value = null;
   await load();
 }
 
 async function resubmit() {
-  const { data } = await eventsApi.resubmitEvent(event.value.id, {});
-  router.push(`/events/${data.id}`);
+  revisionError.value = "";
+
+  const confirmed = await confirm("Resubmit this request for review with your changes?");
+  if (!confirmed) return;
+
+  try {
+    const { data } = await eventsApi.resubmitEvent(event.value.id, { ...revisionForm });
+    router.push(`/events/${data.id}`);
+  } catch (e) {
+    revisionError.value = e.response?.data?.error || "Could not resubmit this request.";
+  }
 }
+
 async function autoAssign() {
   await eventsApi.autoAssign(event.value.id);
   await load();
@@ -716,6 +859,14 @@ onMounted(async () => {
 .decision-reason {
   margin: 0.35rem 0 0;
   font-weight: 400;
+}
+
+.thread-message.approved {
+  background: var(--mint-bg, #d3f5e3);
+}
+
+.thread-message.rejected {
+  background: var(--rose-bg, #fbdcdc);
 }
 
 /* Summary card */

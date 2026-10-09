@@ -26,10 +26,12 @@
 import { onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import eventsApi from "../api/events";
+import { useConfirm } from "../composables/useConfirm";
 
 const drafts = ref([]);
 const error = ref("");
 const router = useRouter();
+const { confirm } = useConfirm();
 
 async function load() {
   error.value = "";
@@ -53,6 +55,11 @@ function editDraft(id) {
 async function submitDraft(id) {
   error.value = "";
 
+  const confirmed = await confirm(
+    "Submit this draft for review? You won't be able to edit it directly afterwards."
+  );
+  if (!confirmed) return;
+
   try {
     await eventsApi.submitEvent(id);
     await load();
@@ -73,13 +80,8 @@ async function deleteDraft(id) {
     return;
   }
 
-  const confirmed = window.confirm(
-    "Delete this draft? This action cannot be undone."
-  );
-
-  if (!confirmed) {
-    return;
-  }
+  const confirmed = await confirm("Delete this draft? This action cannot be undone.");
+  if (!confirmed) return;
 
   try {
     await eventsApi.deleteDraft(id);
