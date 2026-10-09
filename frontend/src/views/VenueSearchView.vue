@@ -32,6 +32,76 @@
         </label>
       </div>
 
+      <fieldset class="filter-panel">
+        <legend>Filter results</legend>
+        <div class="fields">
+          <label>
+            Location
+            <select v-model="filters.location" @change="applyFilters">
+              <option value="">All locations</option>
+              <option v-for="location in filterOptions.locations" :key="location" :value="location">
+                {{ location }}
+              </option>
+            </select>
+          </label>
+          <label>
+            Maximum capacity
+            <input
+              v-model="filters.max_capacity"
+              type="number"
+              min="1"
+              step="1"
+              :aria-invalid="!!errors.max_capacity"
+              @change="applyFilters"
+            />
+            <span v-if="errors.max_capacity" class="field-error">{{ errors.max_capacity }}</span>
+          </label>
+          <fieldset class="option-group">
+            <legend>Accessibility features</legend>
+            <p v-if="!filterOptions.accessibilityFeatures.length" class="filter-hint">
+              No accessibility features are listed in the venue catalogue.
+            </p>
+            <label
+              v-for="feature in filterOptions.accessibilityFeatures"
+              :key="feature"
+              class="option-label"
+            >
+              <input
+                v-model="filters.accessibility"
+                type="checkbox"
+                :value="feature"
+                @change="applyFilters"
+              />
+              {{ feature }}
+            </label>
+          </fieldset>
+          <fieldset class="option-group">
+            <legend>Facilities</legend>
+            <p v-if="!filterOptions.facilities.length" class="filter-hint">
+              No facilities are listed in the venue catalogue.
+            </p>
+            <label
+              v-for="facility in filterOptions.facilities"
+              :key="facility"
+              class="option-label"
+            >
+              <input
+                v-model="filters.facilities"
+                type="checkbox"
+                :value="facility"
+                @change="applyFilters"
+              />
+              {{ facility }}
+            </label>
+          </fieldset>
+        </div>
+        <p v-if="filterOptionsError" class="field-error" role="alert">{{ filterOptionsError }}</p>
+        <div class="filter-actions">
+          <button type="button" :disabled="loading" @click="applyFilters">Apply filters</button>
+          <button type="button" :disabled="loading" @click="clearFilters">Clear filters</button>
+        </div>
+      </fieldset>
+
       <p v-if="pageError" class="field-error" role="alert">{{ pageError }}</p>
       <button type="submit" :disabled="loading">
         {{ loading ? "Searching..." : "Search venues" }}
@@ -41,19 +111,25 @@
     <section v-if="results !== null" class="results" aria-live="polite">
       <h3>Results <span class="count">({{ results.length }})</span></h3>
       <p v-if="!results.length" class="empty">
-        No venues found.
+        No venues match your filters.
       </p>
       <article v-for="venue in results" :key="venue.id" class="card venue-card">
         <h4>{{ venue.name }}</h4>
         <p><strong>Location:</strong> {{ venue.location || "Not specified" }}</p>
         <p><strong>Capacity:</strong> {{ venue.capacity }}</p>
+        <p v-if="venue.accessibilityFeatures?.length">
+          <strong>Accessibility:</strong> {{ venue.accessibilityFeatures.join(", ") }}
+        </p>
+        <p v-if="venue.facilities?.length">
+          <strong>Facilities:</strong> {{ venue.facilities.join(", ") }}
+        </p>
       </article>
     </section>
   </section>
 </template>
 
 <script setup>
-import { reactive, ref } from "vue";
+import { onMounted, reactive, ref } from "vue";
 import venuesApi from "../api/venues";
 
 const criteria = reactive({
@@ -62,10 +138,23 @@ const criteria = reactive({
   end_time: "",
   attendance: "",
 });
+const filters = reactive({
+  location: "",
+  max_capacity: "",
+  accessibility: [],
+  facilities: [],
+});
+const filterOptions = reactive({
+  locations: [],
+  accessibilityFeatures: [],
+  facilities: [],
+});
+const filterOptionsError = ref("");
 const errors = reactive({});
 const results = ref(null);
 const loading = ref(false);
 const pageError = ref("");
+const hasSearched = ref(false);
 let searchSequence = 0;
 
 function validate() {
@@ -96,9 +185,22 @@ async function runSearch() {
     return;
   }
 
+  hasSearched.value = true;
   loading.value = true;
   try {
-    const { data } = await venuesApi.search(criteria);
+    if (
+      filters.max_capacity !== "" &&
+      Number(filters.max_capacity) < Number(criteria.attendance)
+    ) {
+      errors.max_capacity = "Maximum capacity cannot be lower than expected attendance.";
+      results.value = null;
+      return;
+    }
+    delete errors.max_capacity;
+    const { data } = await venuesApi.search({
+      ...criteria,
+      ...filters,
+    });
     if (sequence === searchSequence) results.value = data;
   } catch (error) {
     if (sequence === searchSequence) {
@@ -118,6 +220,28 @@ async function runSearch() {
 function search() {
   return runSearch();
 }
+
+function applyFilters() {
+  if (hasSearched.value) return runSearch();
+}
+
+function clearFilters() {
+  filters.location = "";
+  filters.max_capacity = "";
+  filters.accessibility = [];
+  filters.facilities = [];
+  if (hasSearched.value) runSearch();
+}
+
+onMounted(async () => {
+  try {
+    const { data } = await venuesApi.searchOptions();
+    Object.assign(filterOptions, data);
+  } catch (error) {
+    filterOptionsError.value =
+      error.response?.data?.error || "Could not load venue filter options.";
+  }
+});
 
 </script>
 
@@ -151,6 +275,63 @@ input {
   color: var(--text);
   background: var(--surface);
   font: inherit;
+}
+
+select {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 2.4rem;
+  padding: 0.4rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  color: var(--text);
+  background: var(--surface);
+  font: inherit;
+}
+
+.option-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+}
+
+.option-group legend {
+  padding: 0 0.25rem;
+  font-weight: 600;
+}
+
+.fields .option-label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  margin: 0.35rem 0;
+  font-weight: 400;
+}
+
+.fields .option-label input {
+  width: auto;
+  min-height: auto;
+  margin: 0 0.5rem 0 0;
+}
+
+.filter-hint {
+  margin: 0.25rem 0;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.filter-panel {
+  margin: 1rem 0;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+}
+
+.filter-actions {
+  display: flex;
+  gap: 0.75rem;
 }
 
 .field-error {

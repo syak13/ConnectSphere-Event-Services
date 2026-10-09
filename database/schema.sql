@@ -244,6 +244,14 @@ CREATE TABLE venue_facilities (
     UNIQUE KEY uq_venue_facility (venue_id, facility_name)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE venue_accessibility_features (
+    id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    venue_id        BIGINT UNSIGNED NOT NULL,
+    feature_name    VARCHAR(150) NOT NULL,
+    CONSTRAINT fk_vaf_venue FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE,
+    UNIQUE KEY uq_venue_accessibility_feature (venue_id, feature_name)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- ---------------------------------------------------------------------
 -- Venue Availability Calendar — confirmed bookings (via venue_bookings)
 -- plus other recorded unavailability (maintenance, etc.)

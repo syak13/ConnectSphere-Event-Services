@@ -22,13 +22,17 @@ VALID_PARAMS = {
 }
 
 
-def _create_venue(app, name, capacity=50):
+def _create_venue(app, name, capacity=50, **overrides):
     with app.app_context():
+        values = {
+            "location": "North Campus",
+            "capacity": capacity,
+            "is_active": True,
+        }
+        values.update(overrides)
         venue = Venue(
             name=name,
-            location="North Campus",
-            capacity=capacity,
-            is_active=True,
+            **values,
         )
         db.session.add(venue)
         db.session.commit()
@@ -129,6 +133,177 @@ def test_search_endpoint_excludes_recorded_unavailability_and_returns_empty_arra
     )
     assert no_capacity_match.status_code == 200
     assert no_capacity_match.get_json() == []
+
+
+def test_search_endpoint_combines_catalogue_filters_and_keeps_attendance_rule(
+    app, client, coordinator, auth_header
+):
+    matching_id = _create_venue(
+        app,
+        "Matching",
+        capacity=60,
+        location="East Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Step-free access", "Hearing loop"],
+    )
+    _create_venue(
+        app,
+        "Wrong location",
+        capacity=60,
+        location="West Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Step-free access", "Hearing loop"],
+    )
+    _create_venue(
+        app,
+        "Missing required facility",
+        capacity=60,
+        location="East Campus",
+        facilities=["Projector"],
+        accessibility_features=["Step-free access", "Hearing loop"],
+    )
+    _create_venue(
+        app,
+        "Above maximum",
+        capacity=81,
+        location="East Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Step-free access", "Hearing loop"],
+    )
+    _create_venue(
+        app,
+        "Below attendance",
+        capacity=49,
+        location="East Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Step-free access", "Hearing loop"],
+    )
+
+    response = _request(
+        client,
+        auth_header,
+        {
+            **VALID_PARAMS,
+            "location": "East Campus",
+            "max_capacity": "80",
+            "accessibility": ["Step-free access", "Hearing loop"],
+            "facilities": ["Projector", "Wi-Fi"],
+        },
+    )
+
+    assert response.status_code == 200
+    venues = response.get_json()
+    assert [venue["id"] for venue in venues] == [matching_id]
+    assert venues[0]["facilities"] == ["Projector", "Wi-Fi"]
+    assert venues[0]["accessibilityFeatures"] == ["Hearing loop", "Step-free access"]
+
+
+def test_search_endpoint_rejects_maximum_below_attendance_instead_of_empty_results(
+    client, coordinator, auth_header
+):
+    response = _request(
+        client, auth_header, {**VALID_PARAMS, "max_capacity": "49"}
+    )
+
+    assert response.status_code == 400
+    assert "maximum capacity" in response.get_json()["errors"]["max_capacity"].lower()
+
+
+def test_search_endpoint_checks_maximum_against_out_of_range_attendance(
+    client, coordinator, auth_header
+):
+    response = _request(
+        client,
+        auth_header,
+        {
+            **VALID_PARAMS,
+            "attendance": "4294967296",
+            "max_capacity": "4294967295",
+        },
+    )
+
+    assert response.status_code == 400
+    assert "max_capacity" in response.get_json()["errors"]
+
+
+@pytest.mark.parametrize("max_capacity", ["0", "-1", "50.5", "abc"])
+def test_search_endpoint_rejects_invalid_maximum_capacity(
+    client, coordinator, auth_header, max_capacity
+):
+    response = _request(
+        client, auth_header, {**VALID_PARAMS, "max_capacity": max_capacity}
+    )
+
+    assert response.status_code == 400
+    assert "max_capacity" in response.get_json()["errors"]
+
+
+def test_search_filter_options_come_from_active_venue_catalogue(
+    app, client, coordinator, auth_header
+):
+    _create_venue(
+        app,
+        "First",
+        location="East Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Lift access"],
+    )
+    _create_venue(
+        app,
+        "Second",
+        location="East Campus",
+        facilities=["Projector", "Microphone"],
+        accessibility_features=["Hearing loop"],
+    )
+    _create_venue(
+        app,
+        "Inactive",
+        location="Closed Campus",
+        is_active=False,
+        facilities=["Unused"],
+        accessibility_features=["Unused"],
+    )
+
+    response = client.get(
+        "/api/venues/search/options",
+        headers=auth_header("coordinator@test.com", "password"),
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        "locations": ["East Campus"],
+        "facilities": ["Microphone", "Projector", "Wi-Fi"],
+        "accessibilityFeatures": ["Hearing loop", "Lift access"],
+    }
+
+
+def test_clearing_query_filters_returns_the_original_attendance_matches(
+    app, client, coordinator, auth_header
+):
+    wanted_id = _create_venue(
+        app,
+        "Filtered venue",
+        capacity=60,
+        location="East Campus",
+        facilities=["Projector"],
+    )
+    other_id = _create_venue(
+        app,
+        "Other venue",
+        capacity=60,
+        location="North Campus",
+        facilities=["Whiteboard"],
+    )
+
+    filtered = _request(
+        client,
+        auth_header,
+        {**VALID_PARAMS, "location": "East Campus", "facilities": ["Projector"]},
+    )
+    cleared = _request(client, auth_header, VALID_PARAMS)
+
+    assert [venue["id"] for venue in filtered.get_json()] == [wanted_id]
+    assert {venue["id"] for venue in cleared.get_json()} == {wanted_id, other_id}
 
 
 @pytest.mark.parametrize("missing_field", ["date", "start_time", "end_time", "attendance"])

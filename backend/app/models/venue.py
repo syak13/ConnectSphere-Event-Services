@@ -4,8 +4,11 @@ Venue Booking Approval models.
 """
 from app.common.time import utcnow
 from app.extensions import db
+from sqlalchemy.ext.associationproxy import association_proxy
+from sqlalchemy.dialects.mysql import BIGINT
 
 NOT_SPECIFIED = "not specified"
+VENUE_ID_TYPE = db.BigInteger().with_variant(BIGINT(unsigned=True), "mysql")
 # Single source of truth for venue booking statuses (must match the ENUM in
 # database/schema.sql). Only APPROVED bookings block a venue.
 BOOKING_PENDING = "pending"
@@ -27,6 +30,29 @@ class Venue(db.Model):
     # Week 7 change #1: minutes the venue is occupied before / after an event
     setup_minutes = db.Column(db.Integer, nullable=False, default=0)
     turnaround_minutes = db.Column(db.Integer, nullable=False, default=0)
+
+    facility_entries = db.relationship(
+        "VenueFacility",
+        back_populates="venue",
+        cascade="all, delete-orphan",
+        order_by="VenueFacility.facility_name",
+    )
+    facilities = association_proxy(
+        "facility_entries",
+        "facility_name",
+        creator=lambda facility_name: VenueFacility(facility_name=facility_name),
+    )
+    accessibility_entries = db.relationship(
+        "VenueAccessibilityFeature",
+        back_populates="venue",
+        cascade="all, delete-orphan",
+        order_by="VenueAccessibilityFeature.feature_name",
+    )
+    accessibility_features = association_proxy(
+        "accessibility_entries",
+        "feature_name",
+        creator=lambda feature_name: VenueAccessibilityFeature(feature_name=feature_name),
+    )
 
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     created_at = db.Column(db.DateTime, default=utcnow)
@@ -51,9 +77,40 @@ class Venue(db.Model):
             "location": self.location,
             "capacity": self.capacity,
             "accessibilityInfo": self.accessibility_info,
+            "accessibilityFeatures": list(self.accessibility_features or []),
+            "facilities": list(self.facilities or []),
             "operatingHours": self.operating_hours,
             "isActive": self.is_active,
         }
+
+
+class VenueFacility(db.Model):
+    __tablename__ = "venue_facilities"
+    __table_args__ = (
+        db.UniqueConstraint("venue_id", "facility_name", name="uq_venue_facility"),
+    )
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    venue_id = db.Column(
+        VENUE_ID_TYPE, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False
+    )
+    facility_name = db.Column(db.String(150), nullable=False)
+    venue = db.relationship("Venue", back_populates="facility_entries")
+
+
+class VenueAccessibilityFeature(db.Model):
+    __tablename__ = "venue_accessibility_features"
+    __table_args__ = (
+        db.UniqueConstraint("venue_id", "feature_name", name="uq_venue_accessibility_feature"),
+    )
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    venue_id = db.Column(
+        VENUE_ID_TYPE, db.ForeignKey("venues.id", ondelete="CASCADE"), nullable=False
+    )
+    feature_name = db.Column(db.String(150), nullable=False)
+    venue = db.relationship("Venue", back_populates="accessibility_entries")
+
 
 class VenueUnavailability(db.Model):
     """Venue Staff blocking a venue for maintenance, renovation, etc.
