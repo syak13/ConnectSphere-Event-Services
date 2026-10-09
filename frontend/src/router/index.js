@@ -15,6 +15,8 @@ import PlanningView from "../views/PlanningView.vue";
 import CoordinatorCalendar from "../components/CoordinatorCalendar.vue";
 import VenueBookingRequestView from "../views/VenueBookingRequestView.vue";
 import VenueSearchView from "../views/VenueSearchView.vue";
+import EquipmentView from "../views/EquipmentView.vue";
+
 
 
 const routes = [
@@ -111,6 +113,16 @@ const routes = [
     meta: {
       requiresAuth: true,
       roles: ["event_coordinator"],
+    },
+  },
+
+    {
+    path: "/equipment",
+    name: "equipment",
+    component: EquipmentView,
+    meta: {
+      requiresAuth: true,
+      roles: ["technical_support_staff"],
     },
   },
 ];

@@ -19,10 +19,14 @@ def create_app(config_name="development"):
     from app.auth.routes import auth_bp
     from app.events.routes import events_bp
     from app.venues.routes import venues_bp
+    from app.equipment.routes import equipment_bp
+
 
     app.register_blueprint(auth_bp, url_prefix="/api/auth")
     app.register_blueprint(events_bp, url_prefix="/api/events")
     app.register_blueprint(venues_bp, url_prefix="/api/venues")
+    app.register_blueprint(equipment_bp, url_prefix="/api/equipment")
+
 
     from app.common.errors import register_error_handlers
     register_error_handlers(app)
