@@ -1,4 +1,4 @@
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 
 import pytest
 
@@ -13,6 +13,7 @@ from app.models.venue import (
     VenueBooking,
     VenueUnavailability,
 )
+from app.venues.services import search as search_service
 from app.venues.services.search import search_venues
 
 SEARCH_DATE = date(2026, 10, 8)
@@ -65,9 +66,9 @@ def _add_booking(
         return booking.id
 
 
-def _search(app, attendance=50, start=time(10), end=time(12)):
+def _search(app, attendance=50, start=time(10), end=time(12), **filters):
     with app.app_context():
-        return search_venues(SEARCH_DATE, start, end, attendance)
+        return search_venues(SEARCH_DATE, start, end, attendance, **filters)
 
 
 def test_capacity_comparison_includes_exact_boundary_and_excludes_under_and_inactive(
@@ -195,11 +196,11 @@ def test_empty_result_for_no_capacity_match(app):
 
     assert _search(app, attendance=50) == []
 
-
 def test_attendance_above_capacity_column_range_returns_empty_without_query(app):
     assert _search(app, attendance=4_294_967_296) == []
 
 
+# Story 1: Rechecks existing search behavior after a booking or capacity changes.
 def test_search_reflects_booking_status_and_capacity_mutations(app, coordinator):
     venue_id = _add_venue(app, capacity=49)
     booking_id = _add_booking(
@@ -224,3 +225,172 @@ def test_search_reflects_booking_status_and_capacity_mutations(app, coordinator)
         booking.status = BOOKING_APPROVED
         db.session.commit()
     assert _search(app) == []
+
+
+# ---------------------------------------------------------------------------
+# User Story 2 unit tests: catalogue filters only; date/time availability is
+# covered by the Story 1 tests above.
+# ---------------------------------------------------------------------------
+
+
+# AC1/AC2/AC4: Combines location and max capacity with all-selected feature
+# filters, while preserving the attendance lower bound and exact max boundary.
+def test_combined_filters_require_all_values_and_keep_attendance_bound(app):
+    matching_id = _add_venue(
+        app,
+        "Matching",
+        capacity=60,
+        location="East Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Step-free access", "Hearing loop"],
+    )
+    _add_venue(
+        app,
+        "Wrong location",
+        capacity=60,
+        location="West Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Step-free access", "Hearing loop"],
+    )
+    _add_venue(
+        app,
+        "Missing facility",
+        capacity=60,
+        location="East Campus",
+        facilities=["Projector"],
+        accessibility_features=["Step-free access", "Hearing loop"],
+    )
+    _add_venue(
+        app,
+        "Missing accessibility feature",
+        capacity=60,
+        location="East Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Step-free access"],
+    )
+    _add_venue(
+        app,
+        "Above maximum",
+        capacity=61,
+        location="East Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Step-free access", "Hearing loop"],
+    )
+    below_attendance_id = _add_venue(
+        app,
+        "Below attendance",
+        capacity=49,
+        location="East Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Step-free access", "Hearing loop"],
+    )
+
+    results = _search(
+        app,
+        attendance=50,
+        location="East Campus",
+        max_capacity=60,
+        accessibility_features=["Step-free access", "Hearing loop"],
+        required_facilities=["Projector", "Wi-Fi"],
+    )
+
+    assert [venue.id for venue in results] == [matching_id]
+    assert below_attendance_id not in {venue.id for venue in results}
+
+
+# AC2: Rejects a maximum one below attendance rather than returning empty results.
+def test_max_capacity_below_attendance_is_rejected_by_service(app):
+    _add_venue(app, capacity=100)
+
+    with pytest.raises(ValueError, match="lower than expected attendance"):
+        _search(app, attendance=50, max_capacity=49)
+
+
+# AC2: Checks the maximum against oversized attendance before the database cap shortcut.
+def test_max_capacity_is_checked_when_attendance_exceeds_database_range(app):
+    with pytest.raises(ValueError, match="lower than expected attendance"):
+        _search(app, attendance=4_294_967_296, max_capacity=4_294_967_295)
+
+
+# AC3: Derives sorted, unique filter options from active catalogue entries only.
+def test_filter_options_are_distinct_catalogue_values_for_active_venues(app):
+    _add_venue(
+        app,
+        "First",
+        location="East Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Lift access"],
+    )
+    _add_venue(
+        app,
+        "Second",
+        location="East Campus",
+        facilities=["Projector", "Microphone"],
+        accessibility_features=["Hearing loop"],
+    )
+    _add_venue(
+        app,
+        "Inactive",
+        location="Closed Campus",
+        is_active=False,
+        facilities=["Unused"],
+        accessibility_features=["Unused"],
+    )
+
+    with app.app_context():
+        options = search_service.get_filter_options()
+
+    assert options == {
+        "locations": ["East Campus"],
+        "facilities": ["Microphone", "Projector", "Wi-Fi"],
+        "accessibilityFeatures": ["Hearing loop", "Lift access"],
+    }
+
+
+# AC3/AC4: Keeps legacy catalogue accessibility descriptions selectable and matchable.
+def test_legacy_accessibility_info_remains_filterable_and_an_option(app):
+    venue_id = _add_venue(
+        app, "Accessible", accessibility_info="Wheelchair accessible"
+    )
+
+    with app.app_context():
+        options = search_service.get_filter_options()
+        results = search_venues(
+            SEARCH_DATE,
+            time(10),
+            time(12),
+            50,
+            accessibility_features=["Wheelchair accessible"],
+        )
+
+    assert "Wheelchair accessible" in options["accessibilityFeatures"]
+    assert [venue.id for venue in results] == [venue_id]
+
+
+# AC5: Reapplying changed filters updates matches; an unmatched value returns
+# zero, and clearing filters restores all base-search matches.
+def test_changing_and_clearing_filters_recomputes_matches(app):
+    east_id = _add_venue(
+        app,
+        "East venue",
+        capacity=60,
+        location="East Campus",
+        facilities=["Projector"],
+    )
+    west_id = _add_venue(
+        app,
+        "West venue",
+        capacity=70,
+        location="West Campus",
+        facilities=["Whiteboard"],
+    )
+
+    east_results = _search(app, location="East Campus")
+    missing_results = _search(app, location="East Campus", max_capacity=59)
+    changed_results = _search(app, location="West Campus")
+    cleared_results = _search(app)
+
+    assert [venue.id for venue in east_results] == [east_id]
+    assert missing_results == []
+    assert [venue.id for venue in changed_results] == [west_id]
+    assert {venue.id for venue in cleared_results} == {east_id, west_id}
