@@ -183,6 +183,7 @@ def search_venues():
             errors[field] = "Enter a valid time."
 
     attendance = None
+    max_capacity = None
     attendance_exceeds_capacity = False
     if not attendance_text:
         errors["attendance"] = "Expected attendance is required."
@@ -204,6 +205,34 @@ def search_venues():
             if attendance < 1:
                 errors["attendance"] = "Enter a positive whole number."
 
+    max_capacity_text = args.get("max_capacity", "").strip()
+    if max_capacity_text:
+        if not re.fullmatch(r"[0-9]+", max_capacity_text):
+            errors["max_capacity"] = "Enter a positive whole number."
+        else:
+            normalized_max_capacity = max_capacity_text.lstrip("0") or "0"
+            maximum_capacity = str(search.MAX_VENUE_CAPACITY)
+            if (
+                len(normalized_max_capacity) > len(maximum_capacity)
+                or (
+                    len(normalized_max_capacity) == len(maximum_capacity)
+                    and normalized_max_capacity > maximum_capacity
+                )
+            ):
+                errors["max_capacity"] = "Maximum capacity is out of range."
+            else:
+                max_capacity = int(normalized_max_capacity)
+                if max_capacity < 1:
+                    errors["max_capacity"] = "Enter a positive whole number."
+                elif attendance is not None and max_capacity < attendance:
+                    errors["max_capacity"] = (
+                        "Maximum capacity cannot be lower than expected attendance."
+                    )
+                elif attendance_exceeds_capacity:
+                    errors["max_capacity"] = (
+                        "Maximum capacity cannot be lower than expected attendance."
+                    )
+
     if (
         "start_time" not in errors
         and "end_time" not in errors
@@ -222,12 +251,18 @@ def search_venues():
         start_time=parsed_times["start_time"],
         end_time=parsed_times["end_time"],
         expected_attendance=attendance,
-        # location=args.get("location"),
-        # accessibility_needs=args.getlist("accessibility"),
-        # required_facilities=args.getlist("facilities"),
-        # required_layout=args.get("layout"),
+        location=args.get("location", "").strip() or None,
+        max_capacity=max_capacity,
+        accessibility_features=args.getlist("accessibility"),
+        required_facilities=args.getlist("facilities"),
     )
     return jsonify([v.to_dict() for v in results]), 200
+
+
+@venues_bp.get("/search/options")
+@roles_required("event_coordinator")
+def venue_search_options():
+    return jsonify(search.get_filter_options()), 200
 
 
 @venues_bp.get("/<int:venue_id>/suitability/<int:event_id>")
