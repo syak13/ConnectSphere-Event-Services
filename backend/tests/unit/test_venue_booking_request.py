@@ -464,3 +464,237 @@ def test_ac6_venue_can_be_included_again_after_reject_or_withdraw(
         old_status,
         "pending",
     ]
+
+
+# --------------------------------------------------------------------------
+# User Story: View Status of a Submitted Booking Request
+# --------------------------------------------------------------------------
+
+
+# AC1:
+# Given a submitted booking request, when I view it,
+# then its current status is shown.
+
+def test_status_ac1_submitted_booking_shows_current_status(client, ctx):
+    res = submit(client, ctx, [entry(ctx.hall_a)])
+    assert res.status_code == 201
+
+    booking_id = res.get_json()[0]["id"]
+
+    status_res = client.get(
+        f"{BASE}/bookings/my",
+        headers=ctx.coord,
+    )
+
+    assert status_res.status_code == 200
+
+    bookings = status_res.get_json()
+    booking = next(b for b in bookings if b["id"] == booking_id)
+
+    assert "status" in booking
+    assert booking["status"] == "pending"
+
+
+# AC2:
+# Given I have submitted a request that Venue Staff have not yet
+# decided on, when I view it, then its status shows as "Pending".
+
+def test_status_ac2_undecided_booking_shows_pending(client, ctx):
+    res = submit(client, ctx, [entry(ctx.hall_a)])
+    assert res.status_code == 201
+
+    status_res = client.get(
+        f"{BASE}/bookings/my",
+        headers=ctx.coord,
+    )
+
+    assert status_res.status_code == 200
+    assert status_res.get_json()[0]["status"] == "pending"
+
+
+# AC3:
+# Given Venue Staff have approved my request,
+# when I view it, then its status shows as "Approved".
+
+def test_status_ac3_approved_booking_shows_approved(client, ctx):
+    res = submit(client, ctx, [entry(ctx.hall_a)])
+    assert res.status_code == 201
+
+    booking_id = res.get_json()[0]["id"]
+
+    approve_res = client.post(
+        f"{BASE}/bookings/{booking_id}/approve",
+        headers=ctx.staff,
+    )
+
+    assert approve_res.status_code == 200
+
+    status_res = client.get(
+        f"{BASE}/bookings/my",
+        headers=ctx.coord,
+    )
+
+    assert status_res.status_code == 200
+    assert status_res.get_json()[0]["status"] == "approved"
+
+
+# AC4:
+# Given Venue Staff have rejected my request,
+# when I view it, then its status shows as "Rejected".
+
+def test_status_ac4_rejected_booking_shows_rejected(client, ctx):
+    res = submit(client, ctx, [entry(ctx.hall_a)])
+    assert res.status_code == 201
+
+    booking_id = res.get_json()[0]["id"]
+
+    reject_res = client.post(
+        f"{BASE}/bookings/{booking_id}/reject",
+        headers=ctx.staff,
+        json={"reason": "Venue unavailable"},
+    )
+
+    assert reject_res.status_code == 200
+
+    status_res = client.get(
+        f"{BASE}/bookings/my",
+        headers=ctx.coord,
+    )
+
+    assert status_res.status_code == 200
+
+    booking = status_res.get_json()[0]
+
+    assert booking["status"] == "rejected"
+    assert booking["decisionReason"] == "Venue unavailable"
+
+
+# AC5:
+# Given Venue Staff have just made a decision on my request,
+# when I open or refresh the request, then I see the updated
+# status and not the old one.
+
+def test_status_ac5_refresh_shows_updated_status(client, ctx):
+    res = submit(client, ctx, [entry(ctx.hall_a)])
+    assert res.status_code == 201
+
+    booking_id = res.get_json()[0]["id"]
+
+    # First view: booking is pending.
+    first_res = client.get(
+        f"{BASE}/bookings/my",
+        headers=ctx.coord,
+    )
+
+    assert first_res.status_code == 200
+    assert first_res.get_json()[0]["status"] == "pending"
+
+    # Venue Staff approves the booking.
+    approve_res = client.post(
+        f"{BASE}/bookings/{booking_id}/approve",
+        headers=ctx.staff,
+    )
+
+    assert approve_res.status_code == 200
+
+    # Second view: simulates reopening or refreshing the page.
+    refreshed_res = client.get(
+        f"{BASE}/bookings/my",
+        headers=ctx.coord,
+    )
+
+    assert refreshed_res.status_code == 200
+    assert refreshed_res.get_json()[0]["status"] == "approved"
+    assert refreshed_res.get_json()[0]["status"] != "pending"
+
+
+# AC6:
+# Given I am viewing a submitted request, when the page loads,
+# then I see the status together with the venue, date and time
+# I requested, so I know which request the status belongs to.
+
+def test_status_ac6_booking_shows_venue_date_and_time(client, ctx):
+    requested_date = day(30)
+
+    res = submit(
+        client,
+        ctx,
+        [
+            entry(
+                ctx.hall_a,
+                date=requested_date.isoformat(),
+                startTime="09:00",
+                endTime="17:00",
+            )
+        ],
+    )
+
+    assert res.status_code == 201
+
+    booking_id = res.get_json()[0]["id"]
+
+    status_res = client.get(
+        f"{BASE}/bookings/my",
+        headers=ctx.coord,
+    )
+
+    assert status_res.status_code == 200
+
+    booking = next(
+        b for b in status_res.get_json()
+        if b["id"] == booking_id
+    )
+
+    assert booking["venueId"] == ctx.hall_a
+    assert booking["venueName"] == "Hall A"
+    assert booking["status"] == "pending"
+
+    assert booking["startDatetime"] == at(
+        requested_date, 9
+    ).isoformat()
+
+    assert booking["endDatetime"] == at(
+        requested_date, 17
+    ).isoformat()
+
+
+
+# AC7:
+# Given I am viewing a submitted request, when the system fails
+# to load its status, then I see an error message instead of
+# a blank or outdated status.
+
+def test_status_ac7_failed_request_returns_error(
+    app,
+    client,
+    ctx,
+    monkeypatch,
+):
+    from flask_sqlalchemy.query import Query
+
+    def fail_query(self, *args, **kwargs):
+        raise RuntimeError("Database unavailable")
+
+    # Simulate database failure.
+    monkeypatch.setattr(
+        Query,
+        "filter_by",
+        fail_query,
+    )
+
+    # Prevent Flask from propagating the exception to pytest.
+    # Instead, return an HTTP 500 response.
+    with app.test_request_context():
+        original_propagate = app.config.get("PROPAGATE_EXCEPTIONS")
+        app.config["PROPAGATE_EXCEPTIONS"] = False
+
+        try:
+            res = client.get(
+                f"{BASE}/bookings/my",
+                headers=ctx.coord,
+            )
+
+            assert res.status_code == 500
+
+        finally:
+            app.config["PROPAGATE_EXCEPTIONS"] = original_propagate
