@@ -4,9 +4,8 @@ from datetime import date, datetime, time
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
-from app.extensions import db
-
 from app.auth.decorators import roles_required
+from app.extensions import db
 from app.models.event import Event
 from app.models.user import User
 from app.models.venue import Venue, VenueBooking
@@ -18,6 +17,16 @@ venues_bp = Blueprint("venues", __name__)
 
 def _current_user():
     return User.query.get(int(get_jwt_identity()))
+
+
+def _parse_dt(text):
+    """Parse an ISO datetime. Timezone info is dropped (wall-clock time is kept)
+    because the database stores naive datetimes. Raises ValueError/TypeError."""
+    return datetime.fromisoformat(text).replace(tzinfo=None)
+
+
+# Venue catalogue + calendar are for internal users only.
+INTERNAL_ROLES = ("venue_staff", "event_coordinator")
 
 
 # ---------------------------------------------------------------------
@@ -36,13 +45,13 @@ def create_venue():
 
 
 @venues_bp.get("")
-@jwt_required()
+@roles_required(*INTERNAL_ROLES)
 def list_venues():
     return jsonify([v.to_dict() for v in catalogue.list_venues()]), 200
 
 
 @venues_bp.get("/<int:venue_id>")
-@jwt_required()
+@roles_required(*INTERNAL_ROLES)
 def get_venue(venue_id):
     venue = catalogue.get_venue(venue_id)
     if not venue:
@@ -56,7 +65,11 @@ def update_venue(venue_id):
     venue = catalogue.get_venue(venue_id)
     if not venue:
         return jsonify({"error": "Venue not found"}), 404
-    venue, flags = catalogue.update_venue(venue, request.get_json() or {})
+    try:
+        venue, flags = catalogue.update_venue(venue, request.get_json() or {})
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
     return jsonify({
         "venue": venue.to_dict(),
         "flagsRaised": [f.to_dict() for f in flags],
@@ -81,18 +94,27 @@ def deactivate_venue(venue_id):
 # ---------------------------------------------------------------------
 
 @venues_bp.get("/<int:venue_id>/calendar")
-@jwt_required()
+@roles_required(*INTERNAL_ROLES)
 def get_calendar(venue_id):
     start = request.args.get("start")
     end = request.args.get("end")
     if not start or not end:
         return jsonify({"error": "start and end query params (ISO datetimes) are required"}), 400
-    calendar = availability.get_calendar(venue_id, datetime.fromisoformat(start), datetime.fromisoformat(end))
+    try:
+        start_dt, end_dt = _parse_dt(start), _parse_dt(end)
+    except ValueError:
+        return jsonify({"error": "start and end must be valid ISO datetimes"}), 400
+    if end_dt <= start_dt:
+        return jsonify({"error": "End must be after start"}), 400
+    try:
+        calendar = availability.get_calendar(venue_id, start_dt, end_dt)
+    except LookupError:
+        return jsonify({"error": "Venue not found"}), 404
     return jsonify(calendar), 200
 
 
 @venues_bp.get("/calendar")
-@jwt_required()
+@roles_required(*INTERNAL_ROLES)
 def get_combined_calendar():
     """Combined (all-venues) view -- the other half of the per-venue vs.
     combined toggle, paired with GET /<venue_id>/calendar above."""
@@ -100,7 +122,13 @@ def get_combined_calendar():
     end = request.args.get("end")
     if not start or not end:
         return jsonify({"error": "start and end query params (ISO datetimes) are required"}), 400
-    calendar = availability.get_combined_calendar(datetime.fromisoformat(start), datetime.fromisoformat(end))
+    try:
+        start_dt, end_dt = _parse_dt(start), _parse_dt(end)
+    except ValueError:
+        return jsonify({"error": "start and end must be valid ISO datetimes"}), 400
+    if end_dt <= start_dt:
+        return jsonify({"error": "End must be after start"}), 400
+    calendar = availability.get_combined_calendar(start_dt, end_dt)
     return jsonify(calendar), 200
 
 
@@ -116,8 +144,8 @@ def add_unavailability(venue_id):
         block, flags = availability.add_unavailability(
             venue,
             user.id,
-            datetime.fromisoformat(data.get("start")),
-            datetime.fromisoformat(data.get("end")),
+            _parse_dt(data.get("start")),
+            _parse_dt(data.get("end")),
             data.get("reason"),
         )
     except (ValueError, TypeError) as e:
@@ -126,6 +154,19 @@ def add_unavailability(venue_id):
         "unavailability": block.to_dict(),
         "flagsRaised": [f.to_dict() for f in flags],
     }), 201
+
+
+@venues_bp.delete("/<int:venue_id>/unavailability/<int:block_id>")
+@roles_required("venue_staff")
+def remove_unavailability(venue_id, block_id):
+    venue = catalogue.get_venue(venue_id)
+    if not venue:
+        return jsonify({"error": "Venue not found"}), 404
+    try:
+        availability.remove_unavailability(venue, block_id)
+    except LookupError:
+        return jsonify({"error": "Unavailability period not found"}), 404
+    return "", 204
 
 
 @venues_bp.get("/flags/mine")
@@ -396,41 +437,6 @@ def withdraw_booking(booking_id):
     return jsonify(result.to_dict()), 200
 
 
-@venues_bp.get("/bookings/pending")
-@roles_required("venue_staff")
-def list_pending_bookings():
-    pending = VenueBooking.query.filter_by(status="pending").order_by(VenueBooking.created_at.asc()).all()
-    return jsonify([b.to_dict() for b in pending]), 200
-
-
-@venues_bp.post("/bookings/<int:booking_id>/approve")
-@roles_required("venue_staff")
-def approve_booking(booking_id):
-    user = _current_user()
-    record = VenueBooking.query.get(booking_id)
-    if not record:
-        return jsonify({"error": "Booking not found"}), 404
-    try:
-        result = booking.approve_booking(record, user.id)
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    return jsonify(result.to_dict()), 200
-
-
-@venues_bp.post("/bookings/<int:booking_id>/reject")
-@roles_required("venue_staff")
-def reject_booking(booking_id):
-    user = _current_user()
-    record = VenueBooking.query.get(booking_id)
-    if not record:
-        return jsonify({"error": "Booking not found"}), 404
-    data = request.get_json() or {}
-    try:
-        result = booking.reject_booking(record, user.id, data.get("reason"))
-    except ValueError as e:
-        return jsonify({"error": str(e)}), 400
-    return jsonify(result.to_dict()), 200
-
 @venues_bp.get("/bookings/my")
 @roles_required("event_coordinator")
 def get_my_booking_requests():
@@ -466,3 +472,39 @@ def get_my_booking_requests():
         })
 
     return jsonify(results), 200
+
+
+@venues_bp.get("/bookings/pending")
+@roles_required("venue_staff")
+def list_pending_bookings():
+    pending = VenueBooking.query.filter_by(status="pending").order_by(VenueBooking.created_at.asc()).all()
+    return jsonify([b.to_dict() for b in pending]), 200
+
+
+@venues_bp.post("/bookings/<int:booking_id>/approve")
+@roles_required("venue_staff")
+def approve_booking(booking_id):
+    user = _current_user()
+    record = VenueBooking.query.get(booking_id)
+    if not record:
+        return jsonify({"error": "Booking not found"}), 404
+    try:
+        result = booking.approve_booking(record, user.id)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(result.to_dict()), 200
+
+
+@venues_bp.post("/bookings/<int:booking_id>/reject")
+@roles_required("venue_staff")
+def reject_booking(booking_id):
+    user = _current_user()
+    record = VenueBooking.query.get(booking_id)
+    if not record:
+        return jsonify({"error": "Booking not found"}), 404
+    data = request.get_json() or {}
+    try:
+        result = booking.reject_booking(record, user.id, data.get("reason"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(result.to_dict()), 200
