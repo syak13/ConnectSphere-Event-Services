@@ -21,4 +21,7 @@ export default {
   submitBooking: (payload) => apiClient.post("/venues/bookings", payload),
 
   getMyBookings: () => apiClient.get("/venues/bookings/my"),
+
+  withdrawBooking: (bookingId) =>
+    apiClient.post(`/venues/bookings/${bookingId}/withdraw`),
 };
