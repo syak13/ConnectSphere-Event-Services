@@ -39,12 +39,17 @@ TEST_USERS = [
 TEST_VENUES = [
     {"name": "Main Auditorium", "location": "North Campus", "capacity": 300,
      "accessibility_info": "Wheelchair accessible", "operating_hours": "08:00-22:00",
+     "accessibility_features": ["Wheelchair accessible"],
+     "facilities": ["Microphone", "Projector", "Wi-Fi"],
      "setup_minutes": 30, "turnaround_minutes": 45},
     {"name": "Seminar Room A", "location": "North Campus", "capacity": 40,
      "accessibility_info": None, "operating_hours": "08:00-22:00",
+     "facilities": ["Projector", "Whiteboard", "Wi-Fi"],
      "setup_minutes": 15, "turnaround_minutes": 15},
     {"name": "Banquet Hall", "location": "South Campus", "capacity": 150,
      "accessibility_info": "Step-free entrance", "operating_hours": "08:00-23:00",
+     "accessibility_features": ["Step-free entrance"],
+     "facilities": ["Microphone", "Stage"],
      "setup_minutes": 60, "turnaround_minutes": 60},
 ]
 
@@ -249,7 +254,11 @@ with app.app_context():
 
     venues_created = 0
     for entry in TEST_VENUES:
-        if Venue.query.filter_by(name=entry["name"]).first():
+        venue = Venue.query.filter_by(name=entry["name"]).first()
+        if venue:
+            for field in ("facilities", "accessibility_features"):
+                if not getattr(venue, field) and entry.get(field):
+                    setattr(venue, field, entry[field])
             continue
         db.session.add(Venue(**entry))
         venues_created += 1
