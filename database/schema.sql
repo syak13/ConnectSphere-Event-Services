@@ -213,19 +213,21 @@ CREATE TABLE event_coordinator_history (
 -- ---------------------------------------------------------------------
 
 CREATE TABLE venues (
-    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    name                VARCHAR(255) NOT NULL,
-    location            VARCHAR(255) NOT NULL,
-    capacity            INT UNSIGNED NOT NULL,
-    accessibility_info  TEXT NULL,
-    operating_hours     VARCHAR(255) NULL,
-    is_active           TINYINT(1) NOT NULL DEFAULT 1,
-    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          DATETIME NOT NULL DEFAULT 
-    CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    setup_minutes       INT UNSIGNED NOT NULL DEFAULT 0,
-    turnaround_minutes  INT UNSIGNED NOT NULL DEFAULT 0)
-    ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+    id                      BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name                    VARCHAR(255) NOT NULL,
+    location                VARCHAR(255) NULL,
+    capacity                INT UNSIGNED NOT NULL,
+    description             TEXT NULL,
+    accessibility_info      TEXT NULL,
+    operating_hours         VARCHAR(255) NULL,
+    is_active               TINYINT(1) NOT NULL DEFAULT 1,
+    created_by              BIGINT UNSIGNED NULL,
+    created_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at              DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    setup_minutes           INT UNSIGNED NOT NULL DEFAULT 0,
+    turnaround_minutes      INT UNSIGNED NOT NULL DEFAULT 0,
+    CONSTRAINT fk_venues_creator FOREIGN KEY (created_by) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE venue_layouts (
     id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
@@ -311,8 +313,8 @@ CREATE TABLE venue_availability_flags (
     resolved     TINYINT(1) NOT NULL DEFAULT 0,
     created_at   DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     resolved_at  DATETIME NULL,
-    CONSTRAINT fk_vaf_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
-    CONSTRAINT fk_vaf_venue FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE,
+    CONSTRAINT fk_avail_flag_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+    CONSTRAINT fk_avail_flag_venue FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE,
     INDEX idx_vaf_event (event_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 

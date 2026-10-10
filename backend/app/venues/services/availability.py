@@ -46,24 +46,45 @@ def compute_booking_window(booking, venue: Venue):
     return pad_window(booking.start_datetime, booking.end_datetime, venue)
 
 
+def add_flag_once(event_id: int, venue_id: int, reason: str):
+    """Create an unresolved flag unless an identical one already exists.
+    Returns the new flag, or None if it would have been a duplicate."""
+    existing = VenueAvailabilityFlag.query.filter_by(
+        event_id=event_id, venue_id=venue_id, reason=reason, resolved=False
+    ).first()
+    if existing:
+        return None
+    flag = VenueAvailabilityFlag(event_id=event_id, venue_id=venue_id, reason=reason)
+    db.session.add(flag)
+    return flag
+
+
 def get_calendar(venue_id: int, start, end):
     """View venue availability: approved bookings and recorded
     unavailability for one venue within [start, end]. Each booking entry
     includes its effective (setup/turnaround-padded) window alongside the
     raw record, so the frontend can render either."""
     venue = Venue.query.get(venue_id)
+    if venue is None:
+        raise LookupError("Venue not found")
 
+    # Pre-filter in SQL with a buffer for setup/turnaround, then confirm the
+    # padded window really overlaps [start, end].
+    buffer = timedelta(minutes=(venue.setup_minutes or 0) + (venue.turnaround_minutes or 0))
     bookings = VenueBooking.query.filter(
         VenueBooking.venue_id == venue_id,
         VenueBooking.status == BOOKING_APPROVED,
-    ).all()
+        VenueBooking.start_datetime <= end + buffer,
+        VenueBooking.end_datetime >= start - buffer,
+    ).order_by(VenueBooking.start_datetime.asc()).all()
     booking_dicts = []
     for b in bookings:
+        window = compute_booking_window(b, venue)
+        if not (window[0] <= end and start <= window[1]):
+            continue
         entry = b.to_dict()
-        window = compute_booking_window(b, venue) 
-        if window:
-            entry["effectiveStart"] = window[0].isoformat()
-            entry["effectiveEnd"] = window[1].isoformat()
+        entry["effectiveStart"] = window[0].isoformat()
+        entry["effectiveEnd"] = window[1].isoformat()
         booking_dicts.append(entry)
 
     blocks = VenueUnavailability.query.filter(
@@ -109,13 +130,13 @@ def _flag_affected_events(venue: Venue, start, end, reason: str):
             continue
         event_start, event_end = compute_booking_window(booking, venue)
         if event_start < end and start < event_end:
-            flag = VenueAvailabilityFlag(
-                event_id=event.id,
-                venue_id=venue.id,
-                reason=reason or "Venue marked unavailable during this event's scheduled time",
+            flag = add_flag_once(
+                event.id,
+                venue.id,
+                reason or "Venue marked unavailable during this event's scheduled time",
             )
-            db.session.add(flag)
-            flagged.append(flag)
+            if flag:
+                flagged.append(flag)
     return flagged
 
 
@@ -148,9 +169,9 @@ def flag_timing_conflicts(venue: Venue, reason: str):
                 for ev in (event_a, event_b):
                     if ev.id not in flagged_event_ids:
                         flagged_event_ids.add(ev.id)
-                        flag = VenueAvailabilityFlag(event_id=ev.id, venue_id=venue.id, reason=reason)
-                        db.session.add(flag)
-                        flags.append(flag)
+                        flag = add_flag_once(ev.id, venue.id, reason)
+                        if flag:
+                            flags.append(flag)
     return flags
 
 
@@ -158,6 +179,8 @@ def add_unavailability(venue: Venue, user_id: int, start, end, reason: str = Non
     """Venue Staff mark a venue unavailable for operational reasons.
     Returns (block, flags_raised) -- flags_raised is non-empty when this
     block collides with an already-approved booking's effective window."""
+    if not isinstance(start, datetime) or not isinstance(end, datetime):
+        raise ValueError("start and end must be ISO datetimes")
     if end <= start:
         raise ValueError("End time must be after start time")
 
@@ -170,6 +193,17 @@ def add_unavailability(venue: Venue, user_id: int, start, end, reason: str = Non
 
     db.session.commit()
     return block, flags
+
+
+def remove_unavailability(venue: Venue, block_id: int):
+    """Venue Staff remove an unavailable period (e.g. entered by mistake, or
+    maintenance finished early). The block must belong to this venue.
+    Raises LookupError if it does not exist."""
+    block = VenueUnavailability.query.filter_by(id=block_id, venue_id=venue.id).first()
+    if block is None:
+        raise LookupError("Unavailability period not found")
+    db.session.delete(block)
+    db.session.commit()
 
 
 def list_flags_for_event(event_id: int):
