@@ -14,6 +14,8 @@ from app.venues.services.booking_requests import BookingRequestError
 
 venues_bp = Blueprint("venues", __name__)
 
+def _clean_list(values):
+      return list(dict.fromkeys(v.strip() for v in values if v and v.strip()))
 
 def _current_user():
     return User.query.get(int(get_jwt_identity()))
@@ -296,8 +298,8 @@ def search_venues():
         expected_attendance=attendance,
         location=args.get("location", "").strip() or None,
         max_capacity=max_capacity,
-        accessibility_features=args.getlist("accessibility"),
-        required_facilities=args.getlist("facilities"),
+        accessibility_features=_clean_list(args.getlist("accessibility")),
+        required_facilities=_clean_list(args.getlist("facilities")),
     )
     return jsonify([v.to_dict() for v in results]), 200
 
