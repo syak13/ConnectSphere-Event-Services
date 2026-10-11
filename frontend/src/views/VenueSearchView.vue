@@ -34,10 +34,13 @@
 
       <fieldset class="filter-panel">
         <legend>Filter results</legend>
-        <div class="fields">
+        <p class="filter-description">
+          Options come from active venues in the catalogue. Filters update results after your first search.
+        </p>
+        <div class="filter-grid">
           <label>
             Location
-            <select v-model="filters.location" @change="applyFilters">
+            <select v-model="filters.location" @change="refreshForFilterChange">
               <option value="">All locations</option>
               <option v-for="location in filterOptions.locations" :key="location" :value="location">
                 {{ location }}
@@ -52,58 +55,63 @@
               min="1"
               step="1"
               :aria-invalid="!!errors.max_capacity"
-              @change="applyFilters"
+              @change="refreshForFilterChange"
             />
             <span v-if="errors.max_capacity" class="field-error">{{ errors.max_capacity }}</span>
           </label>
           <fieldset class="option-group">
             <legend>Accessibility features</legend>
-            <p v-if="!filterOptions.accessibilityFeatures.length" class="filter-hint">
-              No accessibility features are listed in the venue catalogue.
-            </p>
-            <label
-              v-for="feature in filterOptions.accessibilityFeatures"
-              :key="feature"
-              class="option-label"
-            >
-              <input
-                v-model="filters.accessibility"
-                type="checkbox"
-                :value="feature"
-                @change="applyFilters"
-              />
-              {{ feature }}
-            </label>
+            <div class="option-list">
+              <p v-if="!filterOptions.accessibilityFeatures.length" class="filter-hint">
+                No accessibility features are listed in the venue catalogue.
+              </p>
+              <label
+                v-for="feature in filterOptions.accessibilityFeatures"
+                :key="feature"
+                class="option-label"
+              >
+                <input
+                  v-model="filters.accessibility"
+                  type="checkbox"
+                  :value="feature"
+                  @change="refreshForFilterChange"
+                />
+                <span>{{ feature }}</span>
+              </label>
+            </div>
           </fieldset>
           <fieldset class="option-group">
             <legend>Facilities</legend>
-            <p v-if="!filterOptions.facilities.length" class="filter-hint">
-              No facilities are listed in the venue catalogue.
-            </p>
-            <label
-              v-for="facility in filterOptions.facilities"
-              :key="facility"
-              class="option-label"
-            >
-              <input
-                v-model="filters.facilities"
-                type="checkbox"
-                :value="facility"
-                @change="applyFilters"
-              />
-              {{ facility }}
-            </label>
+            <div class="option-list">
+              <p v-if="!filterOptions.facilities.length" class="filter-hint">
+                No facilities are listed in the venue catalogue.
+              </p>
+              <label
+                v-for="facility in filterOptions.facilities"
+                :key="facility"
+                class="option-label"
+              >
+                <input
+                  v-model="filters.facilities"
+                  type="checkbox"
+                  :value="facility"
+                  @change="refreshForFilterChange"
+                />
+                <span>{{ facility }}</span>
+              </label>
+            </div>
           </fieldset>
         </div>
         <p v-if="filterOptionsError" class="field-error" role="alert">{{ filterOptionsError }}</p>
         <div class="filter-actions">
-          <button type="button" :disabled="loading" @click="applyFilters">Apply filters</button>
-          <button type="button" :disabled="loading" @click="clearFilters">Clear filters</button>
+          <button type="button" class="secondary-button" :disabled="loading" @click="clearFilters">
+            Clear filters
+          </button>
         </div>
       </fieldset>
 
       <p v-if="pageError" class="field-error" role="alert">{{ pageError }}</p>
-      <button type="submit" :disabled="loading">
+      <button type="submit" class="search-submit" :disabled="loading">
         {{ loading ? "Searching..." : "Search venues" }}
       </button>
     </form>
@@ -221,7 +229,7 @@ function search() {
   return runSearch();
 }
 
-function applyFilters() {
+function refreshForFilterChange() {
   if (hasSearched.value) return runSearch();
 }
 
@@ -251,9 +259,11 @@ onMounted(async () => {
   margin-bottom: 1rem;
 }
 
-.fields {
+.fields,
+.filter-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  align-items: start;
   gap: 1rem;
   margin: 1rem 0;
 }
@@ -265,7 +275,8 @@ label {
   font-weight: 600;
 }
 
-input {
+select,
+input:not([type="checkbox"]) {
   box-sizing: border-box;
   width: 100%;
   min-height: 2.4rem;
@@ -277,43 +288,63 @@ input {
   font: inherit;
 }
 
-select {
-  box-sizing: border-box;
-  width: 100%;
-  min-height: 2.4rem;
-  padding: 0.4rem;
-  border: 1px solid var(--border);
-  border-radius: 0.35rem;
-  color: var(--text);
-  background: var(--surface);
-  font: inherit;
+select:focus-visible,
+input:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .option-group {
   min-width: 0;
+  min-height: 10rem;
   margin: 0;
-  padding: 0.75rem;
+  padding: 0.5rem 0.75rem 0.75rem;
   border: 1px solid var(--border);
-  border-radius: 0.35rem;
+  border-radius: 0.65rem;
+  background: var(--surface);
 }
 
 .option-group legend {
-  padding: 0 0.25rem;
+  padding: 0 0.35rem;
   font-weight: 600;
 }
 
-.fields .option-label {
+.option-list {
+  max-height: 8rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.1rem 0.4rem 0.1rem 0.1rem;
+  scrollbar-color: var(--primary) var(--primary-tint);
+  scrollbar-width: thin;
+}
+
+.option-label {
   display: flex;
   flex-direction: row;
   align-items: center;
-  margin: 0.35rem 0;
+  gap: 0.55rem;
+  margin: 0;
+  padding: 0.4rem 0.3rem;
+  border-radius: 0.4rem;
   font-weight: 400;
+  cursor: pointer;
 }
 
-.fields .option-label input {
-  width: auto;
-  min-height: auto;
-  margin: 0 0.5rem 0 0;
+.option-label:hover {
+  background: var(--primary-tint);
+}
+
+.option-label input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  accent-color: var(--primary);
+}
+
+.option-label span {
+  overflow-wrap: anywhere;
 }
 
 .filter-hint {
@@ -324,14 +355,67 @@ select {
 
 .filter-panel {
   margin: 1rem 0;
-  padding: 1rem;
+  padding: 0.85rem 1rem 1rem;
   border: 1px solid var(--border);
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--surface) 75%, var(--bg));
+}
+
+.filter-description {
+  margin: 0.15rem 0 0.75rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
 }
 
 .filter-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 0.75rem;
+}
+
+.secondary-button {
+  min-height: 2.4rem;
+  padding: 0.45rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 500;
+}
+
+.secondary-button:hover:not(:disabled) {
+  border-color: var(--primary);
+  background: var(--primary-tint);
+}
+
+.secondary-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.search-form > h3 {
+  margin: 0;
+}
+
+.search-submit {
+  min-height: 2.5rem;
+  padding: 0.5rem 1.25rem;
+  border: 0;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+}
+
+.search-submit:hover:not(:disabled) {
+  background: var(--primary-hover);
+}
+
+.search-submit:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .field-error {
@@ -366,16 +450,15 @@ input[aria-invalid="true"] {
   padding: 1.25rem 1.5rem; background: var(--surface); border: 1px solid var(--border);
   border-radius: 14px; box-shadow: 0 4px 16px rgba(109, 91, 208, 0.08);
 }
-button[type="submit"] {
-  padding: 0.55rem 1.3rem; border: none; border-radius: 999px;
-  background: var(--primary); color: #fff; font: inherit; font-weight: 500;
-}
-button[type="submit"]:disabled { opacity: 0.6; cursor: not-allowed; }
-
 
 @media (max-width: 560px) {
-  .fields {
+  .fields,
+  .filter-grid {
     grid-template-columns: 1fr;
+  }
+
+  .option-group {
+    min-height: auto;
   }
 }
 </style>
