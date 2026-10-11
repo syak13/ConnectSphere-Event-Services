@@ -274,6 +274,8 @@ def test_search_filter_options_come_from_active_venue_catalogue(
         "locations": ["East Campus"],
         "facilities": ["Microphone", "Projector", "Wi-Fi"],
         "accessibilityFeatures": ["Hearing loop", "Lift access"],
+        "layouts": [],
+
     }
 
 
@@ -436,3 +438,55 @@ def test_search_endpoint_requires_coordinator_authentication(client):
     response = client.get("/api/venues/search", query_string=VALID_PARAMS)
 
     assert response.status_code == 401
+
+# =====================================================================
+# Story 2 follow-up fixes (integration): paste at the bottom of
+# tests/integration/test_venue_search_api.py
+# =====================================================================
+@pytest.mark.parametrize("param", ["facilities", "accessibility", "layout"])
+@pytest.mark.parametrize("blank", ["", "   "])
+def test_s2_blank_filter_values_are_ignored_not_treated_as_no_match(
+    app, client, coordinator, auth_header, param, blank
+):
+    _create_venue(app, "Hall", facilities=["Projector"], accessibility_features=["Lift"])
+
+    response = _request(client, auth_header, {**VALID_PARAMS, param: blank})
+
+    assert [v["name"] for v in response.get_json()] == ["Hall"]
+
+
+def test_s2_filter_values_are_trimmed_and_deduplicated(
+    app, client, coordinator, auth_header
+):
+    _create_venue(app, "Hall", facilities=["Projector"])
+
+    response = _request(
+        client, auth_header, {**VALID_PARAMS, "facilities": [" Projector", "Projector "]}
+    )
+
+    assert [v["name"] for v in response.get_json()] == ["Hall"]
+
+
+def test_s2_api_free_text_accessibility_info_is_not_offered_as_an_option(
+    app, client, coordinator, auth_header
+):
+    _create_venue(app, "Text only", accessibility_info="Wheelchair accessible, hearing loop")
+    _create_venue(app, "Structured", accessibility_features=["Lift access"])
+
+    response = client.get(
+        "/api/venues/search/options",
+        headers=auth_header("coordinator@test.com", "password"),
+    )
+
+    assert response.get_json()["accessibilityFeatures"] == ["Lift access"]
+
+
+def test_s2_api_filtering_is_case_insensitive(app, client, coordinator, auth_header):
+    _create_venue(app, "Hall", facilities=["Projector"], location="North Campus")
+
+    response = _request(
+        client, auth_header,
+        {**VALID_PARAMS, "facilities": "projector", "location": "NORTH CAMPUS"},
+    )
+
+    assert [v["name"] for v in response.get_json()] == ["Hall"]

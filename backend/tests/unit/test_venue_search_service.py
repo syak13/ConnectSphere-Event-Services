@@ -343,28 +343,9 @@ def test_filter_options_are_distinct_catalogue_values_for_active_venues(app):
     assert options == {
         "locations": ["East Campus"],
         "facilities": ["Microphone", "Projector", "Wi-Fi"],
-        "accessibilityFeatures": ["Hearing loop", "Lift access"],
+        "accessibilityFeatures": ["Hearing loop", "Lift access"], 
+        "layouts": [],
     }
-
-
-# AC3/AC4: Keeps legacy catalogue accessibility descriptions selectable and matchable.
-def test_legacy_accessibility_info_remains_filterable_and_an_option(app):
-    venue_id = _add_venue(
-        app, "Accessible", accessibility_info="Wheelchair accessible"
-    )
-
-    with app.app_context():
-        options = search_service.get_filter_options()
-        results = search_venues(
-            SEARCH_DATE,
-            time(10),
-            time(12),
-            50,
-            accessibility_features=["Wheelchair accessible"],
-        )
-
-    assert "Wheelchair accessible" in options["accessibilityFeatures"]
-    assert [venue.id for venue in results] == [venue_id]
 
 
 # AC5: Reapplying changed filters updates matches; an unmatched value returns
@@ -394,3 +375,64 @@ def test_changing_and_clearing_filters_recomputes_matches(app):
     assert missing_results == []
     assert [venue.id for venue in changed_results] == [west_id]
     assert {venue.id for venue in cleared_results} == {east_id, west_id}
+
+# =====================================================================
+# Story 2 follow-up fixes (unit): paste at the bottom of
+# tests/unit/test_venue_search_service.py
+# =====================================================================
+def _names(venues):
+    return [v.name for v in venues]
+
+def test_s2_free_text_accessibility_info_is_not_a_filter_option_or_match(app):
+    _add_venue(
+        app,
+        "Text only",
+        accessibility_info="Wheelchair accessible, hearing loop",  # free text, no feature rows
+    )
+    _add_venue(app, "Structured", accessibility_features=["Wheelchair accessible"])
+
+    with app.app_context():
+        options = search_service.get_filter_options()
+    assert options["accessibilityFeatures"] == ["Wheelchair accessible"]
+    assert _names(_search(app, accessibility_features=["Wheelchair accessible"])) == ["Structured"]
+
+
+def test_s2_facility_location_and_accessibility_matching_ignore_case(app):
+    _add_venue(
+        app,
+        "Hall",
+        location="North Campus",
+        facilities=["Projector"],
+        accessibility_features=["Hearing loop"],
+    )
+
+    assert _names(_search(app, required_facilities=["projector"])) == ["Hall"]
+    assert _names(_search(app, location="north campus")) == ["Hall"]
+    assert _names(_search(app, accessibility_features=["HEARING LOOP"])) == ["Hall"]
+
+
+def test_s2_venues_without_a_location_do_not_create_a_blank_location_option(app):
+    _add_venue(app, "No location", location=None)
+    _add_venue(app, "Blank location", location="")
+    _add_venue(app, "Has location", location="East Campus")
+
+    with app.app_context():
+        assert search_service.get_filter_options()["locations"] == ["East Campus"]
+
+
+@pytest.mark.parametrize(
+    "start,end,expected",
+    [
+        (time(8), time(10), True),     # starts exactly at opening
+        (time(20), time(22), True),    # ends exactly at closing
+        (time(7, 30), time(9), False),  # starts before opening
+        (time(21), time(22, 30), False),  # ends after closing
+    ],
+)
+def test_s2_search_respects_operating_hours(app, start, end, expected):
+    _add_venue(app, "Day venue", operating_hours="08:00-22:00")
+    _add_venue(app, "No hours recorded", operating_hours=None)
+
+    names = _names(_search(app, start=start, end=end))
+    assert ("Day venue" in names) is expected
+    assert "No hours recorded" in names  # blank hours = no restriction
