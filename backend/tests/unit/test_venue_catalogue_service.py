@@ -520,3 +520,59 @@ class TestSuitabilityCheck:
         )
 
         assert len(flags) == 3
+
+# ---------------------------------------------------------------------------
+# Operating hours as a suitability factor (advisory flag, event start time only:
+# an Event stores a start time but no end time).
+
+from datetime import time  # noqa: E402
+
+
+class TestSuitabilityOperatingHours:
+    HOURS = "08:00-22:00"
+
+    def _flags(self, start, hours=HOURS, **venue_extra):
+        return check_suitability(
+            _event(proposed_time=start), _suit_venue(operating_hours=hours, **venue_extra)
+        )
+
+    def test_start_inside_hours_is_fine(self):
+        assert self._flags(time(10)) == []
+
+    def test_start_exactly_at_opening_is_fine(self):
+        assert self._flags(time(8)) == []
+
+    def test_start_before_opening_is_flagged_with_the_hours_in_the_message(self):
+        flags = self._flags(time(7, 59))
+
+        assert len(flags) == 1
+        assert "07:59" in flags[0] and "08:00-22:00" in flags[0]
+
+    def test_start_exactly_at_closing_is_flagged(self):
+        assert len(self._flags(time(22))) == 1
+
+    def test_start_after_closing_is_flagged(self):
+        assert len(self._flags(time(23))) == 1
+
+    def test_event_without_a_start_time_is_not_checked(self):
+        assert check_suitability(_event(), _suit_venue(operating_hours=self.HOURS)) == []
+        assert check_suitability(_event(proposed_time=None), _suit_venue(operating_hours=self.HOURS)) == []
+
+    @pytest.mark.parametrize("hours", [None, "", "9am-5pm", "25:00-26:00", "22:00-06:00"])
+    def test_venue_without_usable_hours_is_never_flagged(self, hours):
+        assert self._flags(time(3), hours=hours) == []
+
+    def test_setup_and_turnaround_time_are_not_counted_against_opening_hours(self):
+        """Team decision: only the event's own start time is compared with the
+        hours, so an 08:00 start at a venue opening at 08:00 is fine even with
+        30 minutes of setup."""
+        assert self._flags(time(8), setup_minutes=30, turnaround_minutes=45) == []
+
+    def test_hours_flag_is_added_next_to_the_other_flags(self):
+        flags = check_suitability(
+            _event(expected_attendance=500, proposed_time=time(6)),
+            _suit_venue(capacity=100, operating_hours=self.HOURS),
+        )
+
+        assert len(flags) == 2
+        assert any("exceeds" in f for f in flags) and any("operating hours" in f for f in flags)

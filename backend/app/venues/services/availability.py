@@ -7,7 +7,8 @@ compute_booking_window() is the single source of truth for this and is
 reused by booking.py's conflict detection so the two can never drift apart.
 
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
+import re
 
 from app.extensions import db
 from app.models.venue import (
@@ -17,6 +18,31 @@ from app.models.venue import (
     VenueBooking,
     VenueUnavailability,
 )
+_HOURS_PATTERN = re.compile(r"(\d{1,2}):(\d{2})\s*[-\u2013\u2014]\s*(\d{1,2}):(\d{2})")
+
+
+def parse_operating_hours(venue: Venue):
+    """Return (opens, closes) as times, or None when there is no usable restriction."""
+    match = _HOURS_PATTERN.fullmatch((getattr(venue, "operating_hours", None) or "").strip())
+    if not match:
+        return None
+    open_h, open_m, close_h, close_m = (int(g) for g in match.groups())
+    if open_h > 23 or close_h > 23 or open_m > 59 or close_m > 59:
+        return None
+    opens, closes = time(open_h, open_m), time(close_h, close_m)
+    if closes <= opens:
+        return None
+    return opens, closes
+
+
+def fits_operating_hours(venue: Venue, start_time, end_time=None) -> bool:
+    hours = parse_operating_hours(venue)
+    if hours is None:
+        return True
+    opens, closes = hours
+    if end_time is None:
+        return opens <= start_time < closes
+    return opens <= start_time and end_time <= closes
 
 
 def pad_window(start, end, venue: Venue):

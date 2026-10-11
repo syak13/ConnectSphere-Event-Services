@@ -556,3 +556,65 @@ class TestHasConfirmedConflict:
         venue = _venue()
 
         assert has_confirmed_conflict(9999, _candidate(venue, dt(1, 10), dt(1, 12))) is False
+
+# ---------------------------------------------------------------------------
+# Operating-hours helpers (shared by venue search and the suitability check)
+# ---------------------------------------------------------------------------
+from datetime import time  # noqa: E402
+
+from app.venues.services.availability import fits_operating_hours, parse_operating_hours  # noqa: E402
+
+
+def _hours_venue(text):
+    return SimpleNamespace(operating_hours=text)
+
+
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("08:00-22:00", (time(8), time(22))),
+        ("8:00 - 22:00", (time(8), time(22))),
+        ("08:00–22:00", (time(8), time(22))),
+        ("08:30-17:45", (time(8, 30), time(17, 45))),
+    ],
+)
+def test_parse_operating_hours_understands_common_formats(text, expected):
+    assert parse_operating_hours(_hours_venue(text)) == expected
+
+
+@pytest.mark.parametrize(
+    "text", [None, "", "   ", "9am-5pm", "closed", "25:00-26:00", "08:60-10:00", "22:00-06:00", "08:00-08:00"]
+)
+def test_parse_operating_hours_returns_none_when_there_is_no_usable_restriction(text):
+    assert parse_operating_hours(_hours_venue(text)) is None
+
+
+def test_parse_operating_hours_tolerates_objects_without_the_attribute():
+    assert parse_operating_hours(SimpleNamespace()) is None
+
+
+@pytest.mark.parametrize(
+    "start,end,expected",
+    [
+        (time(8), time(22), True),         # exactly the opening hours
+        (time(10), time(12), True),
+        (time(7, 59), time(10), False),    # starts before opening
+        (time(20), time(22, 1), False),    # ends after closing
+        (time(22), time(23), False),       # entirely after closing
+    ],
+)
+def test_fits_operating_hours_with_a_start_and_an_end(start, end, expected):
+    assert fits_operating_hours(_hours_venue("08:00-22:00"), start, end) is expected
+
+
+@pytest.mark.parametrize(
+    "start,expected",
+    [(time(7, 59), False), (time(8), True), (time(21, 59), True), (time(22), False)],
+)
+def test_fits_operating_hours_with_only_a_start_checks_open_inclusive_close_exclusive(start, expected):
+    assert fits_operating_hours(_hours_venue("08:00-22:00"), start) is expected
+
+
+def test_fits_operating_hours_is_always_true_without_usable_hours():
+    assert fits_operating_hours(_hours_venue(None), time(3), time(4)) is True
+    assert fits_operating_hours(_hours_venue(None), time(3)) is True

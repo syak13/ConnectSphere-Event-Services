@@ -177,3 +177,109 @@ class TestLayoutMatching:
 
     def test_venue_with_no_layouts_is_flagged(self):
         assert self._flags("theatre", []) != []
+
+# ---------------------------------------------------------------------------
+# Operating hours in the suitability endpoint and in venue edits
+# ---------------------------------------------------------------------------
+from datetime import date, datetime, time  # noqa: E402
+
+from app.models.event import Event  # noqa: E402
+from app.models.venue import BOOKING_APPROVED, VenueAvailabilityFlag, VenueBooking  # noqa: E402
+
+
+def _hours_event(organiser_id, start, **extra):
+    event = Event(
+        name="Hours event",
+        organiser_id=organiser_id,
+        proposed_date=date(2026, 12, 1),
+        proposed_time=start,
+        expected_attendance=10,
+        **extra,
+    )
+    db.session.add(event)
+    db.session.commit()
+    return event.id
+
+
+class TestSuitabilityOperatingHours:
+    def _check(self, client, coord_hdr, venue_id, event_id):
+        resp = client.get(f"{URL}/{venue_id}/suitability/{event_id}", headers=coord_hdr)
+        assert resp.status_code == 200, resp.get_json()
+        return resp.get_json()
+
+    def test_event_starting_before_opening_is_flagged_not_blocked(
+        self, client, coord_hdr, venue_id, make_user
+    ):
+        organiser = make_user("hours-org@test.com", ["event_organiser"])
+        venue = db.session.get(Venue, venue_id)
+        venue.operating_hours = "08:00-22:00"
+        db.session.commit()
+        event_id = _hours_event(organiser, time(7, 0))
+
+        body = self._check(client, coord_hdr, venue_id, event_id)
+
+        assert body["suitable"] is False
+        assert any("operating hours" in flag for flag in body["flags"])
+
+    def test_event_inside_opening_hours_is_suitable(self, client, coord_hdr, venue_id, make_user):
+        organiser = make_user("hours-org@test.com", ["event_organiser"])
+        venue = db.session.get(Venue, venue_id)
+        venue.operating_hours = "08:00-22:00"
+        db.session.commit()
+        event_id = _hours_event(organiser, time(10, 0))
+
+        body = self._check(client, coord_hdr, venue_id, event_id)
+
+        assert body == {"suitable": True, "flags": []}
+
+    def test_venue_without_hours_never_gets_an_hours_flag(self, client, coord_hdr, venue_id, make_user):
+        organiser = make_user("hours-org@test.com", ["event_organiser"])
+        event_id = _hours_event(organiser, time(3, 0))
+
+        assert self._check(client, coord_hdr, venue_id, event_id)["suitable"] is True
+
+
+class TestChangingOperatingHoursFlagsBookedEvents:
+    def _approved_booking(self, venue_id, organiser_id, coordinator_id, start):
+        event_id = _hours_event(organiser_id, start.time())
+        booking = VenueBooking(
+            event_id=event_id,
+            venue_id=venue_id,
+            requested_by=coordinator_id,
+            status=BOOKING_APPROVED,
+            start_datetime=start,
+            end_datetime=start.replace(hour=start.hour + 2),
+        )
+        db.session.add(booking)
+        db.session.commit()
+        return event_id
+
+    def test_new_hours_that_exclude_an_approved_event_raise_a_flag(
+        self, client, staff_hdr, venue_id, make_user
+    ):
+        organiser = make_user("hours-org@test.com", ["event_organiser"])
+        coordinator = make_user("hours-coord@test.com", ["event_coordinator"])
+        event_id = self._approved_booking(venue_id, organiser, coordinator, datetime(2026, 12, 1, 7, 0))
+
+        resp = client.put(
+            f"{URL}/{venue_id}", json={"operatingHours": "09:00-18:00"}, headers=staff_hdr
+        )
+
+        assert resp.status_code == 200, resp.get_json()
+        assert len(resp.get_json()["flagsRaised"]) == 1
+        flag = VenueAvailabilityFlag.query.filter_by(event_id=event_id).one()
+        assert "operating hours" in flag.reason
+
+    def test_new_hours_that_still_fit_the_event_raise_no_flag(
+        self, client, staff_hdr, venue_id, make_user
+    ):
+        organiser = make_user("hours-org@test.com", ["event_organiser"])
+        coordinator = make_user("hours-coord@test.com", ["event_coordinator"])
+        self._approved_booking(venue_id, organiser, coordinator, datetime(2026, 12, 1, 10, 0))
+
+        resp = client.put(
+            f"{URL}/{venue_id}", json={"operatingHours": "09:00-18:00"}, headers=staff_hdr
+        )
+
+        assert resp.status_code == 200
+        assert resp.get_json()["flagsRaised"] == []
