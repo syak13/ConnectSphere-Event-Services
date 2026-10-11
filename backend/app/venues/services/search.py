@@ -1,6 +1,5 @@
 """Venue Search and Filtering epic: Stories 1 and 2."""
-import re
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 
 from sqlalchemy import and_, func, or_  # `and_` is only used by Story 3
 
@@ -13,7 +12,11 @@ from app.models.venue import (
     VenueLayout,  # STORY 3
     VenueUnavailability,
 )
-from app.venues.services.availability import compute_booking_window, pad_window
+from app.venues.services.availability import (
+    compute_booking_window,
+    fits_operating_hours,
+    pad_window,
+)
 
 # Venue capacity is INT UNSIGNED in database/schema.sql.
 MAX_VENUE_CAPACITY = (1 << 32) - 1
@@ -46,25 +49,6 @@ def _is_available(venue: Venue, start: datetime, end: datetime) -> bool:
         VenueUnavailability.end_datetime > requested_start,
     ).first()
     return closure is None
-
-
-_HOURS_PATTERN = re.compile(r"(\d{1,2}):(\d{2})\s*[-\u2013\u2014]\s*(\d{1,2}):(\d{2})")
-
-
-def _within_operating_hours(venue, start_time, end_time) -> bool:
-    """operating_hours is free text; '08:00-22:00' (spaces, 8:00 and en/em
-    dashes also accepted) is enforced. Blank, unrecognised, impossible or
-    overnight (close <= open) values mean no restriction."""
-    match = _HOURS_PATTERN.fullmatch((venue.operating_hours or "").strip())
-    if not match:
-        return True
-    open_h, open_m, close_h, close_m = (int(g) for g in match.groups())
-    if open_h > 23 or close_h > 23 or open_m > 59 or close_m > 59:
-        return True
-    opens, closes = time(open_h, open_m), time(close_h, close_m)
-    if closes <= opens:
-        return True
-    return opens <= start_time and end_time <= closes
 
 
 def search_venues(
@@ -127,7 +111,7 @@ def search_venues(
     available = [
         venue
         for venue in venues
-        if _within_operating_hours(venue, start_time, end_time)
+        if fits_operating_hours(venue, start_time, end_time)
         and _is_available(venue, start, end)
     ]
     return sorted(available, key=lambda venue: venue.name.casefold())

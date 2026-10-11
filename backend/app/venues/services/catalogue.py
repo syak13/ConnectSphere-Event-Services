@@ -7,7 +7,7 @@ from app.models.venue import (
     VenueAvailabilityFlag,
     VenueBooking,
 )
-SUITABILITY_FIELDS = {"capacity", "supported_layouts", "accessibility_features"}
+SUITABILITY_FIELDS = {"capacity", "supported_layouts", "accessibility_features", "operating_hours"}
 TIMING_FIELDS = {"setup_minutes", "turnaround_minutes"}  # Week 7 change #1
 LIST_FIELDS = {"supported_layouts", "facilities", "accessibility_features"}
 

@@ -3,6 +3,7 @@ blocks a Coordinator from proceeding (per Q&A: suitability is based on
 human judgement, not a hard system-enforced constraint)."""
 from app.models.event import Event
 from app.models.venue import Venue
+from app.venues.services.availability import fits_operating_hours
 
 
 def check_suitability(event: Event, venue: Venue) -> list[str]:
@@ -22,5 +23,11 @@ def check_suitability(event: Event, venue: Venue) -> list[str]:
         venue_access = venue.accessibility_features or []
         if not venue_access:
             flags.append("Venue has no recorded accessibility features")
-
+            
+    proposed_time = getattr(event, "proposed_time", None)
+    if proposed_time is not None and not fits_operating_hours(venue, proposed_time):
+        flags.append(
+            f"Event start time ({proposed_time.strftime('%H:%M')}) is outside the "
+            f"venue's operating hours ({venue.operating_hours})"
+        )
     return flags
