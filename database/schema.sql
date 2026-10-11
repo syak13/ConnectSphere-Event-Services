@@ -229,6 +229,9 @@ CREATE TABLE venues (
     CONSTRAINT fk_venues_creator FOREIGN KEY (created_by) REFERENCES users(id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+-- Search-filter options are stored per venue and maintained by Venue Staff.
+-- The API derives the available layout options from active venue_layouts rows;
+-- this is intentionally not a separate, hard-coded layout lookup list.
 CREATE TABLE venue_layouts (
     id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     venue_id        BIGINT UNSIGNED NOT NULL,

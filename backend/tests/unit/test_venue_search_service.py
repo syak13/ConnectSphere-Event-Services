@@ -436,3 +436,218 @@ def test_s2_search_respects_operating_hours(app, start, end, expected):
     names = _names(_search(app, start=start, end=end))
     assert ("Day venue" in names) is expected
     assert "No hours recorded" in names  # blank hours = no restriction
+
+
+# =====================================================================
+# Story 3: filter venues by supported room layout
+# =====================================================================
+from app.venues.services import catalogue  # noqa: E402
+from app.models.venue import VenueLayout  # noqa: E402
+
+
+def _names(venues):
+    return [v.name for v in venues]
+
+
+# ---- AC1: only venues that support the selected layout are shown --------
+def test_s3_ac1_only_venues_supporting_the_layout_are_returned(app):
+    _add_venue(app, "Theatre hall", supported_layouts=["Theatre"])
+    _add_venue(app, "Classroom only", supported_layouts=["Classroom"])
+    _add_venue(app, "No layouts recorded")
+
+    with app.app_context():
+        result = search_venues(SEARCH_DATE, time(10), time(12), 50, layout="Theatre")
+        assert _names(result) == ["Theatre hall"]
+
+
+def test_s3_ac1_layout_match_is_case_insensitive_and_exact(app):
+    _add_venue(app, "Theatre hall", supported_layouts=["Theatre"])
+    _add_venue(app, "Theatre-style", supported_layouts=["Theatre-style"])
+
+    with app.app_context():
+        assert _names(search_venues(SEARCH_DATE, time(10), time(12), 50, layout="theatre")) == [
+            "Theatre hall"
+        ]
+
+
+def test_s3_ac1_unknown_layout_returns_no_venues(app):
+    _add_venue(app, "Theatre hall", supported_layouts=["Theatre"])
+    assert _search(app, layout="Hexagon") == []
+
+
+def test_s3_ac1_layout_options_come_from_active_venue_catalogue(app):
+    _add_venue(app, "A", supported_layouts=["Theatre", "Classroom"])
+    _add_venue(app, "B", supported_layouts=["Classroom", "Banquet"])
+    _add_venue(app, "Inactive", is_active=False, supported_layouts=["Secret layout"])
+
+    with app.app_context():
+        assert search_service.get_filter_options()["layouts"] == [
+            "Banquet",
+            "Classroom",
+            "Theatre",
+        ]
+
+
+def test_s3_ac1_layout_with_a_smaller_layout_capacity_is_excluded(app):
+    """venue_layouts.max_capacity: a venue that supports Banquet for 40 people
+    is not suitable for a 50-person Banquet even if the room holds 100."""
+    small_id = _add_venue(app, "Small banquet", capacity=100)
+    open_id = _add_venue(app, "Unrestricted banquet", capacity=100)
+    with app.app_context():
+        db.session.add(VenueLayout(venue_id=small_id, layout_name="Banquet", max_capacity=40))
+        db.session.add(VenueLayout(venue_id=open_id, layout_name="Banquet", max_capacity=None))
+        db.session.commit()
+
+    with app.app_context():
+        result = search_venues(SEARCH_DATE, time(10), time(12), 50, layout="Banquet")
+        assert _names(result) == ["Unrestricted banquet"]
+        result = search_venues(SEARCH_DATE, time(10), time(12), 40, layout="Banquet")
+        assert _names(result) == ["Small banquet", "Unrestricted banquet"]
+
+
+# ---- AC2: multiple layouts -> appears for any one, all layouts shown ----
+@pytest.mark.parametrize("selected", ["Theatre", "Classroom", "U-shape"])
+def test_s3_ac2_venue_with_several_layouts_appears_for_each_of_them(app, selected):
+    _add_venue(app, "Flexible", supported_layouts=["Theatre", "Classroom", "U-shape"])
+
+    with app.app_context():
+        result = search_venues(SEARCH_DATE, time(10), time(12), 50, layout=selected)
+        assert _names(result) == ["Flexible"]
+
+
+def test_s3_ac2_result_exposes_every_supported_layout_not_just_the_selected_one(app):
+    _add_venue(app, "Flexible", supported_layouts=["Theatre", "Classroom", "U-shape"])
+
+    with app.app_context():
+        (venue,) = search_venues(SEARCH_DATE, time(10), time(12), 50, layout="Theatre")
+        assert venue.to_dict()["supportedLayouts"] == ["Classroom", "Theatre", "U-shape"]
+
+
+def test_s3_ac2_venue_appears_once_even_when_several_layout_rows_exist(app):
+    _add_venue(app, "Flexible", supported_layouts=["Theatre", "Classroom"])
+    assert len(_search(app, layout="Theatre")) == 1
+
+
+# ---- AC3: layout + everything else, AND logic ---------------------------
+def test_s3_ac3_layout_combines_with_all_other_filters_and_search_criteria(app):
+    full = dict(
+        capacity=60,
+        location="East Campus",
+        facilities=["Projector", "Wi-Fi"],
+        accessibility_features=["Hearing loop"],
+        supported_layouts=["Theatre"],
+    )
+    _add_venue(app, "Matches everything", **full)
+    _add_venue(app, "Wrong layout", **{**full, "supported_layouts": ["Classroom"]})
+    _add_venue(app, "Wrong location", **{**full, "location": "West Campus"})
+    _add_venue(app, "Missing facility", **{**full, "facilities": ["Projector"]})
+    _add_venue(app, "Missing accessibility", **{**full, "accessibility_features": []})
+    _add_venue(app, "Too small", **{**full, "capacity": 49})
+    _add_venue(app, "Over max capacity", **{**full, "capacity": 200})
+
+    with app.app_context():
+        result = search_venues(
+            SEARCH_DATE,
+            time(10),
+            time(12),
+            50,
+            location="East Campus",
+            max_capacity=100,
+            accessibility_features=["Hearing loop"],
+            required_facilities=["Projector", "Wi-Fi"],
+            layout="Theatre",
+        )
+        assert _names(result) == ["Matches everything"]
+
+
+def test_s3_ac3_layout_filter_does_not_bring_back_unavailable_venues(app, coordinator):
+    booked_id = _add_venue(app, "Booked", supported_layouts=["Theatre"])
+    closed_id = _add_venue(app, "Closed", supported_layouts=["Theatre"])
+    _add_venue(app, "Free", supported_layouts=["Theatre"])
+    _add_booking(
+        app, booked_id, coordinator, datetime(2026, 10, 8, 10), datetime(2026, 10, 8, 12)
+    )
+    with app.app_context():
+        db.session.add(
+            VenueUnavailability(
+                venue_id=closed_id,
+                start_datetime=datetime(2026, 10, 8, 9),
+                end_datetime=datetime(2026, 10, 8, 13),
+            )
+        )
+        db.session.commit()
+
+    assert _names(_search(app, layout="Theatre")) == ["Free"]
+
+
+def test_s3_ac3_layout_does_not_bypass_the_attendance_bound(app):
+    _add_venue(app, "Too small", capacity=30, supported_layouts=["Theatre"])
+    assert _search(app, attendance=50, layout="Theatre") == []
+
+
+def test_s3_ac3_max_capacity_below_attendance_is_still_rejected_with_a_layout(app):
+    with pytest.raises(ValueError):
+        _search(app, attendance=50, max_capacity=10, layout="Theatre")
+
+
+# ---- AC4: no layout = no restriction; edits are reflected ---------------
+def test_s3_ac4_without_a_layout_no_layout_restriction_is_applied(app):
+    _add_venue(app, "Theatre hall", supported_layouts=["Theatre"])
+    _add_venue(app, "Classroom", supported_layouts=["Classroom"])
+    _add_venue(app, "No layouts recorded")
+
+    assert _names(_search(app)) == ["Classroom", "No layouts recorded", "Theatre hall"]
+    assert _names(_search(app, layout=None)) == _names(_search(app, layout=""))
+
+
+def test_s3_ac4_editing_supported_layouts_is_reflected_in_the_next_search(app):
+    venue_id = _add_venue(app, "Hall", supported_layouts=["theatre", "classroom"])
+    assert _names(_search(app, layout="Classroom")) == ["Hall"]
+
+    with app.app_context():
+        venue = catalogue.get_venue(venue_id)
+        catalogue.update_venue(venue, {"supportedLayouts": ["Theatre", "Banquet"]})
+
+    assert _search(app, layout="Classroom") == []
+    assert _names(_search(app, layout="Banquet")) == ["Hall"]
+    assert _names(_search(app, layout="Theatre")) == ["Hall"]  # kept layout survives
+
+
+def test_s3_ac4_removing_all_layouts_removes_the_venue_from_layout_searches(app):
+    venue_id = _add_venue(app, "Hall", supported_layouts=["Theatre"])
+    with app.app_context():
+        catalogue.update_venue(catalogue.get_venue(venue_id), {"supportedLayouts": []})
+
+    assert _search(app, layout="Theatre") == []
+    assert _names(_search(app)) == ["Hall"]
+
+
+def test_s3_ac4_layout_options_update_after_an_edit(app):
+    venue_id = _add_venue(app, "Hall", supported_layouts=["theatre"])
+    with app.app_context():
+        catalogue.update_venue(catalogue.get_venue(venue_id), {"supportedLayouts": ["Banquet"]})
+        # the catalogue stores layouts lowercase
+        assert search_service.get_filter_options()["layouts"] == ["banquet"]
+
+
+def test_s3_ac4_create_venue_stores_layouts_and_dedupes_them(app):
+    with app.app_context():
+        venue = catalogue.create_venue(
+            1, {"name": "New", "location": "X", "capacity": 20,
+                "supportedLayouts": ["Theatre", " Theatre ", "", "Classroom"]}
+        )
+        assert sorted(venue.supported_layouts) == ["classroom", "theatre"]
+
+
+def test_s3_ac4_editing_layouts_of_a_venue_with_an_approved_booking_does_not_crash(
+    app, coordinator
+):
+    venue_id = _add_venue(app, "Booked hall", supported_layouts=["theatre"])
+    _add_booking(
+        app, venue_id, coordinator, datetime(2026, 10, 8, 10), datetime(2026, 10, 8, 12)
+    )
+    with app.app_context():
+        venue, flags = catalogue.update_venue(
+            catalogue.get_venue(venue_id), {"supportedLayouts": ["Banquet"]}
+        )
+        assert list(venue.supported_layouts) == ["banquet"]

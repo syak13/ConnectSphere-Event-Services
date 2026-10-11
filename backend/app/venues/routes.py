@@ -300,6 +300,7 @@ def search_venues():
         max_capacity=max_capacity,
         accessibility_features=_clean_list(args.getlist("accessibility")),
         required_facilities=_clean_list(args.getlist("facilities")),
+        layout=args.get("layout", "").strip() or None,
     )
     return jsonify([v.to_dict() for v in results]), 200
 
