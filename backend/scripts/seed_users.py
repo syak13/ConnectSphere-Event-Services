@@ -7,7 +7,8 @@ production (Q&A #28/#45), so there is no self-registration endpoint. This
 script stands in for that external provisioning process during development.
 
 Run with:  python scripts/seed_users.py
-Safe to re-run: existing users, venues and events (matched by name) are skipped.
+Safe to re-run: existing users and events (matched by name) are skipped.
+Existing sample venues are enriched with any missing seeded catalogue values.
 """
 import os
 import sys
@@ -37,20 +38,101 @@ TEST_USERS = [
 ]
 
 TEST_VENUES = [
-    {"name": "Main Auditorium", "location": "North Campus", "capacity": 300,
-     "accessibility_info": "Wheelchair accessible", "operating_hours": "08:00-22:00",
-     "accessibility_features": ["Wheelchair accessible"],
-     "facilities": ["Microphone", "Projector", "Wi-Fi"],
-     "setup_minutes": 30, "turnaround_minutes": 45},
-    {"name": "Seminar Room A", "location": "North Campus", "capacity": 40,
-     "accessibility_info": None, "operating_hours": "08:00-22:00",
-     "facilities": ["Projector", "Whiteboard", "Wi-Fi"],
-     "setup_minutes": 15, "turnaround_minutes": 15},
-    {"name": "Banquet Hall", "location": "South Campus", "capacity": 150,
-     "accessibility_info": "Step-free entrance", "operating_hours": "08:00-23:00",
-     "accessibility_features": ["Step-free entrance"],
-     "facilities": ["Microphone", "Stage"],
-     "setup_minutes": 60, "turnaround_minutes": 60},
+    {
+        "name": "Main Auditorium",
+        "location": "North Campus",
+        "capacity": 300,
+        "accessibility_info": "Wheelchair accessible",
+        "operating_hours": "08:00-22:00",
+        "accessibility_features": ["Wheelchair accessible"],
+        "facilities": ["Microphone", "Projector", "Wi-Fi"],
+        "setup_minutes": 30,
+        "turnaround_minutes": 45,
+        "supported_layouts": ["theatre", "classroom"],
+    },
+    {
+        "name": "Seminar Room A",
+        "location": "North Campus",
+        "capacity": 40,
+        "accessibility_info": None,
+        "operating_hours": "08:00-22:00",
+        "facilities": ["Projector", "Whiteboard", "Wi-Fi"],
+        "setup_minutes": 15,
+        "turnaround_minutes": 15,
+        "supported_layouts": ["classroom", "u-shape"],
+    },
+    {
+        "name": "Banquet Hall",
+        "location": "South Campus",
+        "capacity": 150,
+        "accessibility_info": "Step-free entrance",
+        "operating_hours": "08:00-23:00",
+        "accessibility_features": ["Step-free entrance"],
+        "facilities": ["Microphone", "Stage"],
+        "setup_minutes": 60,
+        "turnaround_minutes": 60,
+        "supported_layouts": ["banquet", "theatre"],
+    },
+    {
+        "name": "Collaborative Workshop Studio",
+        "location": "East Campus",
+        "capacity": 72,
+        "accessibility_info": "Step-free access and adjustable-height tables",
+        "operating_hours": "07:00-22:00",
+        "accessibility_features": ["Step-free access", "Hearing loop"],
+        "facilities": ["Projector", "Whiteboard", "Power outlets", "Wi-Fi"],
+        "setup_minutes": 20,
+        "turnaround_minutes": 20,
+        "supported_layouts": ["classroom", "u-shape", "cabaret"],
+    },
+    {
+        "name": "Executive Boardroom",
+        "location": "Central Campus",
+        "capacity": 24,
+        "accessibility_info": "Lift access",
+        "operating_hours": "08:00-20:00",
+        "accessibility_features": ["Lift access"],
+        "facilities": ["Display screen", "Video conferencing", "Whiteboard"],
+        "setup_minutes": 10,
+        "turnaround_minutes": 10,
+        "supported_layouts": ["boardroom", "hollow square", "u-shape"],
+    },
+    {
+        "name": "Community Events Hall",
+        "location": "West Campus",
+        "capacity": 180,
+        "accessibility_info": "Step-free entrance and accessible washroom",
+        "operating_hours": "08:00-23:00",
+        "accessibility_features": ["Step-free access", "Accessible washroom"],
+        "facilities": ["Kitchenette", "Microphone", "Portable stage", "Wi-Fi"],
+        "setup_minutes": 45,
+        "turnaround_minutes": 45,
+        "supported_layouts": ["banquet", "cabaret", "theatre"],
+    },
+    {
+        "name": "Innovation Lab",
+        "location": "East Campus",
+        "capacity": 48,
+        "accessibility_info": "Step-free access",
+        "operating_hours": "08:00-21:00",
+        "accessibility_features": ["Step-free access"],
+        "facilities": ["Display screens", "Power outlets", "Whiteboard", "Wi-Fi"],
+        "setup_minutes": 15,
+        "turnaround_minutes": 15,
+        "supported_layouts": ["classroom", "island", "boardroom"],
+    },
+    {
+        "name": "Outdoor Amphitheatre",
+        "location": "South Campus",
+        "capacity": 500,
+        "accessibility_info": "Step-free viewing area",
+        "operating_hours": "08:00-22:00",
+        "accessibility_features": ["Step-free access"],
+        "facilities": ["Outdoor stage", "PA system", "Power outlets"],
+        "setup_minutes": 60,
+        "turnaround_minutes": 60,
+        "supported_layouts": ["theatre", "standing"],
+    },
 ]
 
 # ---------------------------------------------------------------------------
@@ -232,11 +314,19 @@ _HELPER_KEYS = {"coordinator", "days", "time", "submitted_days_ago",
                 "review_days_ago", "resubmits"}
 
 with app.app_context():
-    org = Organisation.query.first()
+    org = Organisation.query.filter_by(name="Acme Events Ltd").first()
     if not org:
         org = Organisation(name="Acme Events Ltd")
         db.session.add(org)
         db.session.commit()
+
+    # schema.sql normally inserts the roles, but ensure an older or partially
+    # initialized development database can still be seeded safely.
+    role_names = {role for entry in TEST_USERS for role in entry["roles"]}
+    existing_roles = {role.name for role in Role.query.filter(Role.name.in_(role_names))}
+    for role_name in sorted(role_names - existing_roles):
+        db.session.add(Role(name=role_name))
+    db.session.flush()
 
     created = 0
     for entry in TEST_USERS:
@@ -253,12 +343,24 @@ with app.app_context():
         created += 1
 
     venues_created = 0
+    venues_enriched = 0
     for entry in TEST_VENUES:
         venue = Venue.query.filter_by(name=entry["name"]).first()
         if venue:
-            for field in ("facilities", "accessibility_features"):
-                if not getattr(venue, field) and entry.get(field):
-                    setattr(venue, field, entry[field])
+            # Add missing sample values without deleting catalogue values a
+            # venue staff member may already have added.
+            for field in ("facilities", "accessibility_features", "supported_layouts"):
+                existing_values = {
+                    str(value).strip().casefold()
+                    for value in getattr(venue, field)
+                    if str(value).strip()
+                }
+                for value in entry.get(field, []):
+                    normalized = value.strip()
+                    if normalized and normalized.casefold() not in existing_values:
+                        getattr(venue, field).append(normalized)
+                        existing_values.add(normalized.casefold())
+                        venues_enriched += 1
             continue
         db.session.add(Venue(**entry))
         venues_created += 1
@@ -314,5 +416,8 @@ with app.app_context():
     db.session.commit()
 
     print(f"Seeded {created} new test user(s). Password for all: '{DEFAULT_PASSWORD}'")
-    print(f"Seeded {venues_created} new sample venue(s).")
+    print(
+        f"Seeded {venues_created} new sample venue(s); "
+        f"added {venues_enriched} missing catalogue value(s)."
+    )
     print(f"Seeded {events_created} new sample event(s).")

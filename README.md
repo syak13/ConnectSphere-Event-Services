@@ -65,7 +65,24 @@ This creates one user per role (`organiser@example.com`,
 `techsupport@example.com`, `attendee@example.com`), all with the password
 `Password123!`.
 
-The seed script now also creates sample venues `Main Auditorium`, `Seminar Room A` and `Banquet Hall`.
+The seed script also creates a varied venue catalogue for search testing, with
+room layouts such as `theatre`, `classroom`, `u-shape`, `banquet`, `boardroom`,
+`cabaret`, `hollow square`, `island`, and `standing`. The Room layout filter
+offers the distinct layouts recorded for active venues; these are catalogue
+labels, not a separate fixed list. Existing seeded venues are enriched with
+missing sample catalogue values when the script is re-run, without removing
+values maintained by Venue Staff.
+
+Venue Staff can add or edit venue locations, layouts, facilities, accessibility
+features, and capacities in the Venue Catalogue. Search-filter options are
+derived from active venues, so staff changes are reflected by the next options
+request; layouts are not limited to the sample values in the seed script.
+
+For a fresh database, `database/schema.sql` creates the complete schema,
+including the `venue_layouts` table. To replace an older local development
+database, back up any data you need, drop the old `connectsphere` database,
+then run the schema command above and seed it again. Do not drop a database
+containing data you need to keep.
 
 Run the API:
 
