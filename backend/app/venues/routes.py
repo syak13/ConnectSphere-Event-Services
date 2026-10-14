@@ -477,6 +477,25 @@ def get_my_booking_requests():
     return jsonify(results), 200
 
 
+@venues_bp.get("/bookings/confirmation-notices")
+@roles_required("event_coordinator")
+def booking_confirmation_notices():
+    """Simple in-app notices, derived from approved bookings (no new table)."""
+    user = _current_user()
+    approved = (VenueBooking.query
+                .join(Event, VenueBooking.event_id == Event.id)
+                .filter(Event.coordinator_id == user.id,
+                        VenueBooking.status == "approved")
+                .order_by(VenueBooking.decided_at.desc()).all())
+    return jsonify([{
+        "bookingId": b.id,
+        "eventId": b.event_id,
+        "message": f"Venue confirmed: {b.venue.name if b.venue else 'Venue'} "
+                   f"for {b.event.name if b.event else 'your event'}.",
+        "confirmedAt": b.decided_at.isoformat() if b.decided_at else None,
+    } for b in approved]), 200
+
+
 @venues_bp.get("/bookings/pending")
 @roles_required("venue_staff")
 def list_pending_bookings():
@@ -523,13 +542,15 @@ def list_pending_bookings():
 @roles_required("venue_staff")
 def approve_booking(booking_id):
     user = _current_user()
-    record = VenueBooking.query.get(booking_id)
+    record = db.session.get(VenueBooking, booking_id)
     if not record:
         return jsonify({"error": "Booking not found"}), 404
     try:
         result = booking.approve_booking(record, user.id)
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": str(e)}), 409
     return jsonify(result.to_dict()), 200
 
 

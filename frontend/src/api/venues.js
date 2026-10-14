@@ -49,4 +49,10 @@ export default {
 
   // Venue Staff: Get pending booking requests
   getPendingBookings: () => apiClient.get("/venues/bookings/pending"),
+
+  approveBooking: (bookingId) =>
+    apiClient.post(`/venues/bookings/${bookingId}/approve`),
+
+  getConfirmationNotices: () =>
+    apiClient.get("/venues/bookings/confirmation-notices"),
 };

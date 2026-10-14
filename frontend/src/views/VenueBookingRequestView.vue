@@ -139,6 +139,13 @@
         </button>
       </div>
 
+      <!-- Simple confirmation notices for approved venue bookings -->
+      <div v-if="confirmationNotices.length" class="confirmation-notices" role="status">
+        <p v-for="notice in confirmationNotices" :key="notice.bookingId">
+          ✓ {{ notice.message }}
+        </p>
+      </div>
+
       <p v-if="statusError" class="error-message" role="alert">{{ statusError }}</p>
       <p v-if="withdrawNotice" class="success-message" role="status">{{ withdrawNotice }}</p>
       <p v-if="statusLoading" class="status-message">Loading booking requests...</p>
@@ -215,6 +222,7 @@ const errors = ref([]);
 const successMessage = ref("");
 
 const myBookings = ref([]);
+const confirmationNotices = ref([]);
 const statusLoading = ref(false);
 const statusError = ref("");
 const bookingToWithdraw = ref(null);
@@ -323,6 +331,16 @@ async function submitBooking() {
   }
 }
 
+async function loadConfirmationNotices() {
+  try {
+    const { data } = await venuesApi.getConfirmationNotices();
+    confirmationNotices.value = Array.isArray(data) ? data : [];
+  } catch (error) {
+    confirmationNotices.value = [];
+    console.error("Unable to load booking confirmations", error);
+  }
+}
+
 async function loadMyBookings() {
   statusLoading.value = true;
   statusError.value = "";
@@ -330,6 +348,7 @@ async function loadMyBookings() {
   try {
     const response = await venuesApi.getMyBookings();
     myBookings.value = response.data;
+    await loadConfirmationNotices();
   } catch (error) {
     myBookings.value = []; // Never display outdated statuses after a failed refresh.
     statusError.value =
@@ -436,6 +455,17 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.confirmation-notices {
+  margin: 0 0 1rem;
+  padding: .8rem 1rem;
+  border: 1px solid #86efac;
+  border-radius: 10px;
+  background: var(--mint-bg, #dcfce7);
+  color: var(--mint-text, #166534);
+  font-weight: 500;
+}
+.confirmation-notices p { margin: .3rem 0; }
+
 .page-title { margin: 0 0 1rem; font-size: 1.5rem; font-weight: 600; color: var(--text, #2d2a4a); }
 .card { background: var(--surface, #fff); border: 1px solid var(--border, #e4defa); border-radius: 14px; box-shadow: 0 4px 16px rgba(109, 91, 208, .08); overflow: hidden; }
 .section { padding: 1.25rem; border-bottom: 1px solid var(--border, #e4defa); }
