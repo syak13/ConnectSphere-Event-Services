@@ -536,8 +536,18 @@ from app.models.venue import Venue, VenueBooking
 from app.venues.services import booking as venue_booking
 
 
-def _create_venue_booking(event, organiser, status="pending"):
-    venue = Venue(name="Test Hall", location="Campus", capacity=200)
+def _create_venue_booking(
+    event,
+    organiser,
+    status="pending",
+    venue_owner_id=None,
+):
+    venue = Venue(
+        name="Test Hall",
+        location="Campus",
+        capacity=200,
+        created_by=venue_owner_id,
+    )
     db.session.add(venue)
     db.session.flush()
     booking = VenueBooking(
@@ -576,14 +586,22 @@ def test_pending_venue_keeps_event_in_planning(app, organiser, make_event):
 
 
 def test_venue_approval_moves_event_to_safety_check_without_equipment(
-    app, organiser, coordinator, make_event
+    app, organiser, make_user, make_event
 ):
     with app.app_context():
+        venue_staff_id = make_user(
+            "status-venue-staff@test.com",
+            ["venue_staff"],
+        )
         event_id = make_event(organiser, status="planning", capacity_needed=100)
         event = db.session.get(Event, event_id)
-        booking = _create_venue_booking(event, organiser)
+        booking = _create_venue_booking(
+            event,
+            organiser,
+            venue_owner_id=venue_staff_id,
+        )
 
-        venue_booking.approve_booking(booking, decided_by=coordinator)
+        venue_booking.approve_booking(booking, decided_by=venue_staff_id)
 
         assert event.status == "safety_check"
         assert EventStatusHistory.query.filter_by(
@@ -592,17 +610,25 @@ def test_venue_approval_moves_event_to_safety_check_without_equipment(
 
 
 def test_pending_equipment_prevents_safety_check_after_venue_approval(
-    app, organiser, coordinator, make_event
+    app, organiser, make_user, make_event
 ):
     with app.app_context():
+        venue_staff_id = make_user(
+            "status-venue-staff-equipment@test.com",
+            ["venue_staff"],
+        )
         event_id = make_event(organiser, status="planning", capacity_needed=100)
         event = db.session.get(Event, event_id)
         event.equipment_requirements.append(
             EventEquipmentRequirement(equipment_type="Projector", quantity=1)
         )
-        booking = _create_venue_booking(event, organiser)
+        booking = _create_venue_booking(
+            event,
+            organiser,
+            venue_owner_id=venue_staff_id,
+        )
 
-        venue_booking.approve_booking(booking, decided_by=coordinator)
+        venue_booking.approve_booking(booking, decided_by=venue_staff_id)
 
         assert event.status == "planning"
 
@@ -752,11 +778,32 @@ def test_cancelling_approved_venue_reverts_confirmed_event_to_planning(
         venue_booking.cancel_booking(booking, decided_by=coordinator, reason="Venue unavailable")
 
         assert booking.status == "cancelled"
+        assert booking.decided_by == coordinator
+        assert booking.decision_reason == "Venue unavailable"
+        assert booking.decided_at is not None
         assert event.status == "planning"
         history = EventStatusHistory.query.filter_by(
             event_id=event_id, new_status="planning"
         ).one()
         assert "venue booking" in history.reason.lower()
+
+
+def test_pending_venue_booking_cannot_be_cancelled(app, organiser, coordinator, make_event):
+    with app.app_context():
+        event_id = make_event(organiser, status="planning", capacity_needed=100)
+        event = db.session.get(Event, event_id)
+        booking = _create_venue_booking(event, organiser, status="pending")
+
+        with pytest.raises(ValueError, match="Only approved bookings"):
+            venue_booking.cancel_booking(
+                booking,
+                decided_by=coordinator,
+                reason="Venue unavailable",
+            )
+
+        assert booking.status == "pending"
+        assert booking.decided_by is None
+        assert booking.decision_reason is None
 
 
 def test_venue_staff_can_cancel_booking_through_api(

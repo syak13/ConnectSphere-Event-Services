@@ -38,7 +38,7 @@
       </div>
       <div v-if="event.reviewDecision?.outcome" class="notice" :class="event.reviewDecision.outcome">
         <strong>
-          {{ event.reviewDecision.outcome === "approved" ? "Request approved" : "Request rejected" }}
+          Coordinator {{ event.reviewDecision.outcome === "approved" ? "approved" : "rejected" }} request
         </strong>
         <p class="decision-meta">
           By {{ event.reviewDecision.coordinatorName || `Coordinator #${event.reviewDecision.coordinatorId}` }}
@@ -46,6 +46,12 @@
         </p>
         <p v-if="event.reviewDecision.reason" class="decision-reason">
           <strong>Reason:</strong> {{ event.reviewDecision.reason }}
+        </p>
+      </div>
+      <div v-if="event.safetyReviews?.length" class="notice">
+        <strong>Latest safety decision: {{ event.safetyReviews.at(-1).decision.replaceAll("_", " ") }}</strong>
+        <p v-if="event.safetyReviews.at(-1).comments" class="decision-reason">
+          {{ event.safetyReviews.at(-1).comments }}
         </p>
       </div>
       <p class="description">{{ event.description }}</p>
@@ -205,6 +211,44 @@
       </div>
     </section>
 
+    <section v-if="auth.hasRole('safety_officer') && event.status === 'safety_check'">
+      <h3 class="section-title">Operational Safety Check</h3>
+      <div class="action-block">
+        <fieldset class="safety-checklist">
+          <legend>Factors assessed</legend>
+          <label v-for="factor in safetyFactors" :key="factor.key">
+            <input v-model="assessedSafetyFactors" type="checkbox" :value="factor.key">
+            {{ factor.label }}
+          </label>
+        </fieldset>
+        <fieldset class="safety-checklist">
+          <legend>Factors of concern</legend>
+          <label v-for="factor in safetyFactors" :key="factor.key">
+            <input v-model="concernSafetyFactors" type="checkbox" :value="factor.key">
+            {{ factor.label }}
+          </label>
+        </fieldset>
+        <fieldset class="safety-checklist">
+          <legend>Affected arrangements</legend>
+          <label>
+            <input v-model="affectedSafetyArrangements" type="checkbox" value="venue">
+            Venue
+          </label>
+          <label>
+            <input v-model="affectedSafetyArrangements" type="checkbox" value="equipment">
+            Equipment
+          </label>
+        </fieldset>
+        <textarea v-model="comment" placeholder="Reason (required for rejection or change requests)"></textarea>
+        <p v-if="safetyError" class="field-error">{{ safetyError }}</p>
+        <div class="actions">
+          <button class="btn btn-mint" @click="submitSafetyDecision('approved')">Approve safety</button>
+          <button class="btn btn-rose" @click="submitSafetyDecision('rejected')">Reject arrangement</button>
+          <button class="btn btn-butter" @click="submitSafetyDecision('changes_requested')">Request changes</button>
+        </div>
+      </div>
+    </section>
+
     <!-- Organiser Actions: Event Review and Approval -->
     <section v-if="isOwningOrganiser">
       <template v-if="canRespondToClarifications && openClarifications.length">
@@ -344,6 +388,9 @@ const auth = useAuthStore();
 
 const event = ref(null);
 const comment = ref("");
+const assessedSafetyFactors = ref([]);
+const concernSafetyFactors = ref([]);
+const affectedSafetyArrangements = ref([]);
 const responseNotes = ref("");
 const newCoordinatorId = ref(null);
 const coordinators = ref([]);
@@ -353,7 +400,19 @@ const reviewHistory = ref([]);
 
 const confirmState = ref(null); // { message, onConfirm, onCancel }
 const actionError = ref("");
+const safetyError = ref("");
 const { confirm } = useConfirm();
+
+const safetyFactors = [
+  { key: "expected_attendance", label: "Expected attendance" },
+  { key: "venue_capacity", label: "Venue capacity" },
+  { key: "venue_layout", label: "Venue layout" },
+  { key: "emergency_access", label: "Emergency access" },
+  { key: "accessibility", label: "Accessibility requirements" },
+  { key: "equipment_placement", label: "Equipment placement" },
+  { key: "crowd_movement", label: "Crowd movement" },
+  { key: "venue_restrictions", label: "Known venue restrictions" },
+];
 
 const EDITABLE_FIELD_OPTIONS = [
   { key: "name", label: "Event name", type: "text" },
@@ -431,6 +490,26 @@ async function load() {
   }
 
   clarificationThread.value.filter((item) => item.response === null).forEach(ensureResponseForm);
+}
+
+async function submitSafetyDecision(decision) {
+  safetyError.value = "";
+  try {
+    await eventsApi.reviewSafety(event.value.id, {
+      decision,
+      comments: comment.value,
+      assessedFactors: assessedSafetyFactors.value,
+      concernFactors: concernSafetyFactors.value,
+      affectedArrangements: affectedSafetyArrangements.value,
+    });
+    comment.value = "";
+    assessedSafetyFactors.value = [];
+    concernSafetyFactors.value = [];
+    affectedSafetyArrangements.value = [];
+    await load();
+  } catch (error) {
+    safetyError.value = error.response?.data?.error || "Could not submit the safety decision.";
+  }
 }
 
 async function loadCoordinators() {

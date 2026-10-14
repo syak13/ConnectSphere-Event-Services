@@ -17,6 +17,7 @@ from app.models.event import Event
 from app.models.venue import (
     ACTIVE_BOOKING_STATUSES as ACTIVE_STATUSES,
     BOOKING_APPROVED as APPROVED,
+    BOOKING_CANCELLED as CANCELLED,
     BOOKING_PENDING as PENDING,
     BOOKING_REJECTED as REJECTED,
     BOOKING_WITHDRAWN as WITHDRAWN,
@@ -118,6 +119,84 @@ def withdraw_booking_request(
         raise
 
 
+def cancel_booking(
+    booking: VenueBooking,
+    decided_by: int,
+    reason: str = None,
+) -> VenueBooking:
+    """Cancel an approved booking and reconsider its event arrangements."""
+    if reason is not None and not isinstance(reason, str):
+        raise ValueError("Reason must be text")
+    if reason is not None and len(reason) > 500:
+        raise ValueError("Reason must not exceed 500 characters")
+
+    reason = reason.strip() or None if reason is not None else None
+
+    try:
+        # Serialize cancellation with approvals for this venue and reload the
+        # booking so a stale request cannot overwrite a newer decision.
+        venue = (
+            db.session.query(Venue)
+            .filter(Venue.id == booking.venue_id)
+            .with_for_update()
+            .first()
+        )
+        if venue is None:
+            raise ValueError("Venue not found")
+
+        current = (
+            db.session.query(VenueBooking)
+            .populate_existing()
+            .filter(VenueBooking.id == booking.id)
+            .first()
+        )
+        if current is None:
+            raise ValueError("Booking not found")
+        if current.status != APPROVED:
+            raise ValueError("Only approved bookings can be cancelled")
+
+        updated = (
+            VenueBooking.query
+            .filter(
+                VenueBooking.id == current.id,
+                VenueBooking.status == APPROVED,
+            )
+            .update(
+                {
+                    VenueBooking.status: CANCELLED,
+                    VenueBooking.decided_by: decided_by,
+                    VenueBooking.decision_reason: reason,
+                    VenueBooking.decided_at: utcnow(),
+                },
+                synchronize_session="fetch",
+            )
+        )
+        if updated != 1:
+            raise ValueError("This booking is no longer approved")
+
+        event = db.session.get(Event, current.event_id)
+        if event is not None:
+            from app.events.services.status import (
+                reconsider_event_after_arrangement_loss,
+            )
+
+            change_reason = f"Venue booking #{current.id} was cancelled"
+            if reason:
+                change_reason += f": {reason}"
+            reconsider_event_after_arrangement_loss(
+                event,
+                changed_by_id=decided_by,
+                reason=change_reason,
+            )
+
+        db.session.commit()
+        db.session.refresh(current)
+        return current
+    except Exception:
+        db.session.rollback()
+        raise
+
+
 
 def has_confirmed_conflict(
     venue_id: int,
@@ -214,9 +293,16 @@ def approve_booking(booking: VenueBooking, decided_by: int) -> VenueBooking:
                    .update({VenueBooking.status: APPROVED,
                             VenueBooking.decided_by: decided_by,
                             VenueBooking.decided_at: utcnow()},
-                           synchronize_session=False))
+                           synchronize_session="fetch"))
         if updated != 1:
             raise ValueError("This booking request has already been decided")
+
+        event = db.session.get(Event, current.event_id)
+        if event is not None:
+            from app.events.services.status import try_advance_to_safety_check
+
+            try_advance_to_safety_check(event, changed_by_id=decided_by)
+
         db.session.commit()
         db.session.refresh(current)
         return current

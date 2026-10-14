@@ -138,7 +138,8 @@ TEST_VENUES = [
 ]
 
 # ---------------------------------------------------------------------------
-# Dummy events. One per status so every screen/state in the app has data.
+# Dummy events cover the common workflow states; safety-check demos are staged
+# directly at safety_check so Safety Officers can exercise the checklist.
 # "coordinator" is the email of the assigned coordinator (None = unassigned,
 # as for drafts). "days" is the proposed date offset from today (negative =
 # past). "resubmits" names an earlier event this one was resubmitted from.
@@ -223,6 +224,42 @@ TEST_EVENTS = [
         "submitted_days_ago": 20,
         "review_outcome": "approved", "review_reason": "Approved. Venue and equipment to be arranged.",
         "review_days_ago": 15,
+    },
+    {
+        "name": "Hackathon Safety Check Demo",
+        "purpose": "Safety review demonstration",
+        "description": "Sample event staged for a Safety Officer to complete the operational checklist.",
+        "category": "Workshop",
+        "status": "safety_check",
+        "coordinator": "coordinator2@example.com",
+        "days": 42, "time": time(9, 0),
+        "expected_attendance": 60, "capacity_needed": 72,
+        "required_layout": "Classroom",
+        "accessibility_needs": "Step-free access and hearing loop",
+        "required_facilities": ["Projector", "Whiteboard", "Power outlets"],
+        "registration_required": 1, "intended_capacity": 72,
+        "submitted_days_ago": 8,
+        "review_outcome": "approved",
+        "review_reason": "Coordinator approved; venue and equipment arrangements are ready for safety review.",
+        "review_days_ago": 5,
+    },
+    {
+        "name": "Community Fair Safety Check Demo",
+        "purpose": "Safety review demonstration",
+        "description": "Sample outdoor event staged for manual safety-check testing.",
+        "category": "Community",
+        "status": "safety_check",
+        "coordinator": "coordinator1@example.com",
+        "days": 50, "time": time(11, 0),
+        "expected_attendance": 120, "capacity_needed": 180,
+        "required_layout": "Standing",
+        "accessibility_needs": "Step-free viewing and accessible washroom",
+        "required_facilities": ["Portable stage", "Microphone", "Wi-Fi"],
+        "registration_required": 1, "intended_capacity": 180,
+        "submitted_days_ago": 9,
+        "review_outcome": "approved",
+        "review_reason": "Coordinator approved; arrangements are ready for operational safety review.",
+        "review_days_ago": 6,
     },
     {
         "name": "Industry Panel: Future of AI",
