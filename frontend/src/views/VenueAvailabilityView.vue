@@ -277,7 +277,7 @@ const dayRows = computed(() =>
         segments.push({
           kind: "booked",
           ...core,
-          title: `Event #${b.eventId}, ${fmtTime(b.startDatetime)} to ${fmtTime(b.endDatetime)}`,
+          title: `${b.eventName || `Event #${b.eventId}`}, ${fmt(b.startDatetime)} to ${fmt(b.endDatetime)}`,
         });
       }
     }
@@ -298,7 +298,7 @@ const items = computed(() =>
         venue: r.venue?.name,
         start: b.startDatetime,
         end: b.endDatetime,
-        detail: `Event #${b.eventId}. Venue held ${fmt(b.effectiveStart)} to ${fmt(b.effectiveEnd)} including setup and turnaround.`,
+        detail: `${b.eventName || `Event #${b.eventId}`}. Venue held ${fmt(b.effectiveStart)} to ${fmt(b.effectiveEnd)} including setup and turnaround.`,
       })),
       ...(r.unavailability || []).map((u) => ({
         key: `u${u.id}`,

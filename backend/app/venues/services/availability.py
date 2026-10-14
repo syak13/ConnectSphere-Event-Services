@@ -109,6 +109,7 @@ def get_calendar(venue_id: int, start, end):
         if not (window[0] <= end and start <= window[1]):
             continue
         entry = b.to_dict()
+        entry["eventName"] = b.event.name if b.event else f"Event #{b.event_id}"
         entry["effectiveStart"] = window[0].isoformat()
         entry["effectiveEnd"] = window[1].isoformat()
         booking_dicts.append(entry)
