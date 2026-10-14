@@ -2,13 +2,21 @@ import apiClient from "./client";
 
 function toSearchQuery(criteria) {
   const params = new URLSearchParams();
+
   for (const [key, value] of Object.entries(criteria)) {
     if (Array.isArray(value)) {
-      for (const item of value) params.append(key, item);
-    } else if (value !== "" && value !== null && value !== undefined) {
+      for (const item of value) {
+        params.append(key, item);
+      }
+    } else if (
+      value !== "" &&
+      value !== null &&
+      value !== undefined
+    ) {
       params.append(key, value);
     }
   }
+
   return params.toString();
 }
 
@@ -16,34 +24,92 @@ export default {
   // Get all venues
   listVenues: () => apiClient.get("/venues"),
 
-  // Venue catalogue (Venue Staff manage; Event Coordinators read)
+  // Venue catalogue
   getVenue: (id) => apiClient.get(`/venues/${id}`),
-  create: (payload) => apiClient.post("/venues", payload),
-  update: (id, payload) => apiClient.put(`/venues/${id}`, payload),
-  deactivate: (id) => apiClient.delete(`/venues/${id}`),
+
+  create: (payload) =>
+    apiClient.post("/venues", payload),
+
+  update: (id, payload) =>
+    apiClient.put(`/venues/${id}`, payload),
+
+  deactivate: (id) =>
+    apiClient.delete(`/venues/${id}`),
 
   // Availability calendar
   getCalendar: (id, start, end) =>
-    apiClient.get(`/venues/${id}/calendar`, { params: { start, end } }),
+    apiClient.get(`/venues/${id}/calendar`, {
+      params: { start, end },
+    }),
+
   getCombinedCalendar: (start, end) =>
-    apiClient.get("/venues/calendar", { params: { start, end } }),
-  addUnavailability: (id, payload) => apiClient.post(`/venues/${id}/unavailability`, payload),
+    apiClient.get("/venues/calendar", {
+      params: { start, end },
+    }),
+
+  addUnavailability: (id, payload) =>
+    apiClient.post(`/venues/${id}/unavailability`, payload),
+
   removeUnavailability: (id, blockId) =>
-    apiClient.delete(`/venues/${id}/unavailability/${blockId}`),
-  myFlags: () => apiClient.get("/venues/flags/mine"),
-  resolveFlag: (id) => apiClient.post(`/venues/flags/${id}/resolve`),
+    apiClient.delete(
+      `/venues/${id}/unavailability/${blockId}`
+    ),
 
-  // Search venues by event criteria and catalogue filters
-  search: (criteria) => apiClient.get(`/venues/search?${toSearchQuery(criteria)}`),
+  myFlags: () =>
+    apiClient.get("/venues/flags/mine"),
 
-  // Get catalogue-backed values for the search filters
-  searchOptions: () => apiClient.get("/venues/search/options"),
+  resolveFlag: (id) =>
+    apiClient.post(`/venues/flags/${id}/resolve`),
 
-  // Submit one booking request with one or more venues
-  submitBooking: (payload) => apiClient.post("/venues/bookings", payload),
+  // Search venues
+  search: (criteria) =>
+    apiClient.get(
+      `/venues/search?${toSearchQuery(criteria)}`
+    ),
 
-  // Coordinator's own booking requests, and withdrawing a pending one
-  getMyBookings: () => apiClient.get("/venues/bookings/my"),
+  searchOptions: () =>
+    apiClient.get("/venues/search/options"),
+
+  // Submit booking request
+  submitBooking: (payload) =>
+    apiClient.post("/venues/bookings", payload),
+
+  // Event Coordinator: booking requests
+  getMyBookings: () =>
+    apiClient.get("/venues/bookings/my"),
+
   withdrawBooking: (bookingId) =>
-    apiClient.post(`/venues/bookings/${bookingId}/withdraw`),
+    apiClient.post(
+      `/venues/bookings/${bookingId}/withdraw`
+    ),
+
+  // Venue Staff: pending booking requests
+  getPendingBookings: () =>
+    apiClient.get("/venues/bookings/pending"),
+
+  // Venue Staff: approve booking
+  approveBooking: (bookingId) =>
+    apiClient.post(
+      `/venues/bookings/${bookingId}/approve`
+    ),
+
+  // Venue Staff: reject booking
+  // Both reason and alternativeSuggestion are optional
+  rejectBooking: (bookingId, payload = {}) =>
+    apiClient.post(
+      `/venues/bookings/${bookingId}/reject`,
+      payload
+    ),
+
+  // Event Coordinator: approval notifications
+  getConfirmationNotices: () =>
+    apiClient.get(
+      "/venues/bookings/confirmation-notices"
+    ),
+
+  // Event Coordinator: rejection notifications
+  getRejectionNotices: () =>
+    apiClient.get(
+      "/venues/bookings/rejection-notices"
+    ),
 };

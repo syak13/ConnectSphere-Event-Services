@@ -172,53 +172,105 @@ def has_confirmed_conflict(
     return False
 
 
-def approve_booking(
-    booking: VenueBooking,
-    decided_by: int,
-) -> VenueBooking:
-    """Approve a pending booking request."""
+def approve_booking(booking: VenueBooking, decided_by: int) -> VenueBooking:
+    """Approve under a venue-row lock to serialize approvals for this venue."""
+    try:
+        # MySQL/InnoDB: competing approvals for the same venue wait here.
+        venue = (db.session.query(Venue)
+                 .filter(Venue.id == booking.venue_id)
+                 .with_for_update().first())
+        if venue is None:
+            raise ValueError("Venue not found")
+        if venue.created_by != decided_by:
+            raise PermissionError("You cannot approve requests for another staff member's venue")
 
-    if booking.status != PENDING:
-        raise ValueError(
-            "Only a pending booking request can be approved"
-        )
+        # Re-read after acquiring the lock; don't trust the earlier route lookup.
+        current = (db.session.query(VenueBooking)
+                   .populate_existing()
+                   .filter(VenueBooking.id == booking.id).first())
+        if current is None:
+            raise ValueError("Booking not found")
+        if current.status != PENDING:
+            raise ValueError("This booking request has already been decided")
 
-    if has_confirmed_conflict(
-        booking.venue_id,
-        booking,
-        exclude_booking_id=booking.id,
-    ):
-        raise ValueError(
-            "This venue already has an approved booking "
-            "that overlaps with this booking's time"
-        )
+        start, end = compute_booking_window(current, venue)
+        confirmed = (VenueBooking.query
+                     .filter(VenueBooking.venue_id == venue.id,
+                             VenueBooking.status == APPROVED,
+                             VenueBooking.id != current.id)
+                     .all())
+        for other in confirmed:
+            other_start, other_end = compute_booking_window(other, venue)
+            if other_start < end and start < other_end:
+                event_name = other.event.name if other.event else f"Event #{other.event_id}"
+                raise ValueError(
+                    f"Conflicts with booking #{other.id} ({event_name}), "
+                    f"{other.start_datetime.isoformat()} to {other.end_datetime.isoformat()}"
+                )
 
-    booking.status = APPROVED
-    booking.decided_by = decided_by
-    booking.decided_at = utcnow()
-
-    db.session.commit()
-
-    return booking
+        # Conditional update protects against stale decisions.
+        updated = (VenueBooking.query
+                   .filter(VenueBooking.id == current.id, VenueBooking.status == PENDING)
+                   .update({VenueBooking.status: APPROVED,
+                            VenueBooking.decided_by: decided_by,
+                            VenueBooking.decided_at: utcnow()},
+                           synchronize_session=False))
+        if updated != 1:
+            raise ValueError("This booking request has already been decided")
+        db.session.commit()
+        db.session.refresh(current)
+        return current
+    except Exception:
+        db.session.rollback()
+        raise
 
 
 def reject_booking(
     booking: VenueBooking,
     decided_by: int,
     reason: str = None,
+    alternative: str = None,
 ) -> VenueBooking:
-    """Reject a pending booking request."""
+    """Reject a pending booking, with optional reason and alternative."""
+    for label, value in (("Reason", reason), ("Alternative suggestion", alternative)):
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"{label} must be text")
+        if value is not None and len(value) > 500:
+            raise ValueError(f"{label} must not exceed 500 characters")
 
-    if booking.status != PENDING:
-        raise ValueError(
-            "Only a pending booking request can be rejected"
-        )
+    reason = reason.strip() or None if reason is not None else None
+    alternative = alternative.strip() or None if alternative is not None else None
 
-    booking.status = REJECTED
-    booking.decided_by = decided_by
-    booking.decision_reason = reason
-    booking.decided_at = utcnow()
+    try:
+        venue = (db.session.query(Venue)
+                 .filter(Venue.id == booking.venue_id)
+                 .with_for_update().first())
+        if venue is None:
+            raise ValueError("Venue not found")
+        if venue.created_by != decided_by:
+            raise PermissionError("You cannot reject requests for another staff member's venue")
 
-    db.session.commit()
+        current = (db.session.query(VenueBooking)
+                   .populate_existing()
+                   .filter(VenueBooking.id == booking.id).first())
+        if current is None:
+            raise ValueError("Booking not found")
+        if current.status != PENDING:
+            raise ValueError("This booking request has already been decided")
 
-    return booking
+        updated = (VenueBooking.query
+                   .filter(VenueBooking.id == current.id, VenueBooking.status == PENDING)
+                   .update({VenueBooking.status: REJECTED,
+                            VenueBooking.decided_by: decided_by,
+                            VenueBooking.decision_reason: reason,
+                            VenueBooking.alternative_suggestion: alternative,
+                            VenueBooking.decided_at: utcnow()},
+                           synchronize_session=False))
+        if updated != 1:
+            raise ValueError("This booking request has already been decided")
+        db.session.commit()
+        db.session.refresh(current)
+        return current
+    except Exception:
+        db.session.rollback()
+        raise

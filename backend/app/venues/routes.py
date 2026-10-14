@@ -472,29 +472,106 @@ def get_my_booking_requests():
                 if booking.created_at else None
             ),
             "decisionReason": booking.decision_reason,
+            "alternativeSuggestion": booking.alternative_suggestion,
         })
 
     return jsonify(results), 200
 
 
+@venues_bp.get("/bookings/confirmation-notices")
+@roles_required("event_coordinator")
+def booking_confirmation_notices():
+    """Simple in-app notices, derived from approved bookings (no new table)."""
+    user = _current_user()
+    approved = (VenueBooking.query
+                .join(Event, VenueBooking.event_id == Event.id)
+                .filter(Event.coordinator_id == user.id,
+                        VenueBooking.status == "approved")
+                .order_by(VenueBooking.decided_at.desc()).all())
+    return jsonify([{
+        "bookingId": b.id,
+        "eventId": b.event_id,
+        "message": f"Venue confirmed: {b.venue.name if b.venue else 'Venue'} "
+                   f"for {b.event.name if b.event else 'your event'}.",
+        "confirmedAt": b.decided_at.isoformat() if b.decided_at else None,
+    } for b in approved]), 200
+
+
+@venues_bp.get("/bookings/rejection-notices")
+@roles_required("event_coordinator")
+def booking_rejection_notices():
+    """In-app rejection notices derived from saved booking decisions."""
+    user = _current_user()
+    rejected = (VenueBooking.query
+                .filter(VenueBooking.requested_by == user.id,
+                        VenueBooking.status == "rejected")
+                .order_by(VenueBooking.decided_at.desc()).all())
+    return jsonify([{
+        "bookingId": b.id,
+        "eventId": b.event_id,
+        "message": f"Venue booking rejected: {b.venue.name if b.venue else 'Venue'} "
+                   f"for {b.event.name if b.event else 'your event'}.",
+        "reason": b.decision_reason,
+        "alternativeSuggestion": b.alternative_suggestion,
+        "rejectedAt": b.decided_at.isoformat() if b.decided_at else None,
+    } for b in rejected]), 200
+
+
 @venues_bp.get("/bookings/pending")
 @roles_required("venue_staff")
 def list_pending_bookings():
-    pending = VenueBooking.query.filter_by(status="pending").order_by(VenueBooking.created_at.asc()).all()
-    return jsonify([b.to_dict() for b in pending]), 200
+    user = _current_user()
+
+    pending = (
+        VenueBooking.query
+        .join(Venue, VenueBooking.venue_id == Venue.id)
+        .filter(
+            VenueBooking.status == "pending",
+            Venue.created_by == user.id,
+        )
+        .order_by(
+            VenueBooking.start_datetime.asc(),
+            VenueBooking.id.asc(),
+        )
+        .all()
+    )
+
+    results = []
+
+    for booking in pending:
+        data = booking.to_dict()
+
+        event = booking.event
+        venue = booking.venue
+
+        data.update({
+            "eventName": event.name if event else None,
+            "eventDescription": event.description if event else None,
+            "expectedAttendance": (
+                event.expected_attendance if event else None
+            ),
+            "venueName": venue.name if venue else None,
+            "venueLocation": venue.location if venue else None,
+        })
+
+        results.append(data)
+
+    return jsonify(results), 200
 
 
 @venues_bp.post("/bookings/<int:booking_id>/approve")
 @roles_required("venue_staff")
 def approve_booking(booking_id):
     user = _current_user()
-    record = VenueBooking.query.get(booking_id)
+    record = db.session.get(VenueBooking, booking_id)
     if not record:
         return jsonify({"error": "Booking not found"}), 404
     try:
         result = booking.approve_booking(record, user.id)
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        return jsonify({"error": str(e)}), 409
     return jsonify(result.to_dict()), 200
 
 
@@ -505,9 +582,22 @@ def reject_booking(booking_id):
     record = VenueBooking.query.get(booking_id)
     if not record:
         return jsonify({"error": "Booking not found"}), 404
-    data = request.get_json() or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
-        result = booking.reject_booking(record, user.id, data.get("reason"))
+        result = booking.reject_booking(
+            record,
+            user.id,
+            reason=data.get("reason"),
+            alternative=data.get("alternativeSuggestion"),
+        )
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        message = str(e)
+        status = 409 if "already been decided" in message else 400
+        return jsonify({"error": message}), status
     return jsonify(result.to_dict()), 200

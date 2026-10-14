@@ -17,6 +17,7 @@ import VenueBookingRequestView from "../views/VenueBookingRequestView.vue";
 import VenueSearchView from "../views/VenueSearchView.vue";
 import VenueCatalogueView from "../views/VenueCatalogueView.vue";
 import VenueAvailabilityView from "../views/VenueAvailabilityView.vue";
+import VenueBookingApprovalView from "../views/VenueBookingApprovalView.vue";
 
 
 const routes = [
@@ -107,7 +108,7 @@ const routes = [
   },
 
   {
-    path: "/venue-booking-request",
+    path: "/venues/request",
     name: "venue-booking-request",
     component: VenueBookingRequestView,
     meta: {
@@ -129,6 +130,16 @@ const routes = [
     component: VenueCatalogueView,
     meta: { requiresAuth: true, roles: ["venue_staff", "event_coordinator"] },
   },
+
+  {
+  path: "/venues/approval",
+  name: "venue-booking-approval",
+  component: VenueBookingApprovalView,
+  meta: {
+    requiresAuth: true,
+    roles: ["venue_staff"],
+  },
+},
 ];
 
 

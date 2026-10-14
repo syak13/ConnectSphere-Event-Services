@@ -22,7 +22,8 @@ from app import create_app  # noqa: E402
 from app.extensions import db  # noqa: E402
 from app.models.event import Event  # noqa: E402  (adjust if your Event model lives elsewhere)
 from app.models.user import Organisation, Role, User  # noqa: E402
-from app.models.venue import Venue  # noqa: E402
+from app.models.venue import Venue, VenueBooking
+from app.common.time import utcnow
 
 app = create_app(os.getenv("FLASK_ENV", "development"))
 
@@ -407,6 +408,20 @@ with app.app_context():
     db.session.commit()
 
     # -----------------------------------------------------------------
+    # Assign seeded venues to Venue Staff
+    # -----------------------------------------------------------------
+    venue_staff = User.query.filter_by(
+        email="venue@example.com"
+    ).first()
+
+    if venue_staff:
+        for venue in Venue.query.all():
+            if venue.created_by is None:
+                venue.created_by = venue_staff.id
+
+        db.session.commit()
+
+    # -----------------------------------------------------------------
     # Events
     # -----------------------------------------------------------------
     organiser = User.query.filter_by(email="organiser@example.com").first()
@@ -452,6 +467,149 @@ with app.app_context():
         events_created += 1
 
     db.session.commit()
+
+
+    # -----------------------------------------------------------------
+    # Venue Booking Requests
+    # -----------------------------------------------------------------
+    # Sample requests for testing Venue Booking Request and Approval.
+    # Safe to re-run: existing bookings are not duplicated.
+
+    TEST_BOOKINGS = [
+        {
+            "event": "Quarterly All-Hands Meeting",
+            "venue": "Main Auditorium",
+            "status": "pending",
+            "start_hour": 14,
+            "duration": 2,
+            "coordinator": "coordinator1@example.com",
+        },
+        {
+            "event": "Leadership Workshop",
+            "venue": "Seminar Room A",
+            "status": "pending",
+            "start_hour": 9,
+            "start_minute": 30,
+            "duration": 3,
+            "coordinator": "coordinator2@example.com",
+        },
+        {
+            "event": "Leadership Workshop",
+            "venue": "Innovation Lab",
+            "status": "pending",
+            "start_hour": 9,
+            "start_minute": 30,
+            "duration": 3,
+            "coordinator": "coordinator2@example.com",
+        },
+        {
+            "event": "Hackathon Kickoff",
+            "venue": "Main Auditorium",
+            "status": "pending",
+            "start_hour": 9,
+            "duration": 2,
+            "coordinator": "coordinator2@example.com",
+        },
+        {
+            "event": "Industry Panel: Future of AI",
+            "venue": "Main Auditorium",
+            "status": "approved",
+            "start_hour": 17,
+            "duration": 2,
+            "coordinator": "coordinator1@example.com",
+        },
+        {
+            "event": "Alumni Networking Dinner",
+            "venue": "Banquet Hall",
+            "status": "approved",
+            "start_hour": 18,
+            "start_minute": 30,
+            "duration": 3,
+            "coordinator": "coordinator1@example.com",
+        },
+        {
+            "event": "Open Air Music Night",
+            "venue": "Outdoor Amphitheatre",
+            "status": "rejected",
+            "start_hour": 20,
+            "duration": 2,
+            "coordinator": "coordinator1@example.com",
+        },
+        {
+            "event": "Open Air Music Night (Revised)",
+            "venue": "Banquet Hall",
+            "status": "pending",
+            "start_hour": 20,
+            "duration": 2,
+            "coordinator": "coordinator1@example.com",
+        },
+        {
+            "event": "Charity Gala Evening",
+            "venue": "Community Events Hall",
+            "status": "withdrawn",
+            "start_hour": 19,
+            "duration": 3,
+            "coordinator": "coordinator1@example.com",
+        },
+    ]
+
+    bookings_created = 0
+
+    for entry in TEST_BOOKINGS:
+        event = Event.query.filter_by(
+            name=entry["event"],
+            organiser_id=organiser.id,
+        ).first()
+
+        venue = Venue.query.filter_by(
+            name=entry["venue"],
+        ).first()
+
+        coordinator = User.query.filter_by(
+            email=entry["coordinator"],
+        ).first()
+
+        if not event or not venue or not coordinator:
+            print(f"Skipping booking for {entry['event']}: missing data")
+            continue
+
+        # Avoid duplicate seeded bookings.
+        existing = VenueBooking.query.filter_by(
+            event_id=event.id,
+            venue_id=venue.id,
+        ).first()
+
+        if existing:
+            continue
+
+        start_datetime = datetime.combine(
+            event.proposed_date,
+            time(
+                entry["start_hour"],
+                entry.get("start_minute", 0),
+            ),
+        )
+
+        end_datetime = start_datetime + timedelta(
+            hours=entry["duration"],
+        )
+
+        booking = VenueBooking(
+            event_id=event.id,
+            venue_id=venue.id,
+            requested_by=coordinator.id,
+            status=entry["status"],
+            start_datetime=start_datetime,
+            end_datetime=end_datetime,
+        )
+
+        db.session.add(booking)
+        bookings_created += 1
+
+    db.session.commit()
+
+    print(f"Seeded {bookings_created} new venue booking request(s).")
+
 
     print(f"Seeded {created} new test user(s). Password for all: '{DEFAULT_PASSWORD}'")
     print(

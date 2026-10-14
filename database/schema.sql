@@ -290,8 +290,9 @@ CREATE TABLE venue_unavailability (
     INDEX idx_vu_venue_dates (venue_id, start_datetime, end_datetime)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+
 -- ---------------------------------------------------------------------
--- Venue Booking Request / Approval / Conflict Detection
+-- Venue Booking Request / Approval / Rejection / Conflict Detection
 -- Resubmission after rejection = new row (audit-friendly)
 -- ---------------------------------------------------------------------
 
@@ -313,9 +314,14 @@ CREATE TABLE venue_bookings (
     CONSTRAINT fk_vb_requested_by FOREIGN KEY (requested_by) REFERENCES users(id),
     CONSTRAINT fk_vb_decided_by FOREIGN KEY (decided_by) REFERENCES users(id),
     INDEX idx_vb_event (event_id),
-    INDEX idx_vb_venue_dates (venue_id, start_datetime, end_datetime),
+    INDEX idx_vb_venue_dates (
+        venue_id,
+        start_datetime,
+        end_datetime
+    ),
     INDEX idx_vb_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 
 
 -- ---------------------------------------------------------------------
