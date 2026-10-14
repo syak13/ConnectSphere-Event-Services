@@ -1,4 +1,4 @@
-"""Unit tests for Story 1: consistent event status display."""
+"""Unit tests for event status stories 1 through 3."""
 from datetime import time
 from types import SimpleNamespace
 
@@ -7,6 +7,7 @@ import pytest
 from app.events.routes import _can_view
 from app.events.services.status import change_status
 from app.models.event import EVENT_STATUSES, Event, EventStatusHistory, STATUS_LABELS, UNKNOWN_STATUS_LABEL
+from app.models.user import User
 
 ORG = "organiser@test.com"
 COORD = "coordinator@test.com"
@@ -511,3 +512,314 @@ class TestAC4RemainsUsableWithManyRequests:
         res = _mine(client, auth_header(ORG))
         assert res.status_code == 200
         assert isinstance(res.get_json(), list)
+
+
+"""Unit tests for Story 3: arrangements lead to a safety check before confirmation.
+
+Acceptance criteria:
+1. Coordinator approval moves the request to planning.
+2. Complete venue/equipment arrangements move planning to safety_check, never directly to confirmed.
+3. Only a Safety Officer can approve, reject, or request changes; approval confirms, while rejection/changes return to planning.
+4. Arrangement loss returns safety_check/confirmed events to planning, and repeated checks do not duplicate transitions.
+"""
+from datetime import timedelta
+
+from app.common.time import utcnow
+from app.equipment.services import reservation as equipment_reservation
+from app.events.services import review
+from app.events.services import safety
+from app.events.services import status as status_service
+from app.extensions import db
+from app.models.equipment import EquipmentItem, EquipmentReservation
+from app.models.event import Event, EventEquipmentRequirement, EventSafetyReview, EventStatusHistory
+from app.models.venue import Venue, VenueBooking
+from app.venues.services import booking as venue_booking
+
+
+def _create_venue_booking(event, organiser, status="pending"):
+    venue = Venue(name="Test Hall", location="Campus", capacity=200)
+    db.session.add(venue)
+    db.session.flush()
+    booking = VenueBooking(
+        event_id=event.id,
+        venue_id=venue.id,
+        requested_by=organiser,
+        status=status,
+        start_datetime=utcnow() + timedelta(days=30),
+        end_datetime=utcnow() + timedelta(days=30, hours=2),
+    )
+    db.session.add(booking)
+    db.session.commit()
+    return booking
+
+
+def test_approval_moves_event_to_planning(app, organiser, coordinator, make_event):
+    with app.app_context():
+        event_id = make_event(organiser, status="under_review", coordinator_id=coordinator)
+        event = db.session.get(Event, event_id)
+
+        review.approve_event(event, coordinator)
+
+        assert event.status == "planning"
+        assert [entry.new_status for entry in event.status_history] == ["approved", "planning"]
+
+
+def test_pending_venue_keeps_event_in_planning(app, organiser, make_event):
+    with app.app_context():
+        event_id = make_event(organiser, status="planning", capacity_needed=100)
+        event = db.session.get(Event, event_id)
+        _create_venue_booking(event, organiser)
+
+        status_service.try_advance_to_safety_check(event, changed_by_id=organiser)
+
+        assert event.status == "planning"
+
+
+def test_venue_approval_moves_event_to_safety_check_without_equipment(
+    app, organiser, coordinator, make_event
+):
+    with app.app_context():
+        event_id = make_event(organiser, status="planning", capacity_needed=100)
+        event = db.session.get(Event, event_id)
+        booking = _create_venue_booking(event, organiser)
+
+        venue_booking.approve_booking(booking, decided_by=coordinator)
+
+        assert event.status == "safety_check"
+        assert EventStatusHistory.query.filter_by(
+            event_id=event_id, new_status="safety_check"
+        ).count() == 1
+
+
+def test_pending_equipment_prevents_safety_check_after_venue_approval(
+    app, organiser, coordinator, make_event
+):
+    with app.app_context():
+        event_id = make_event(organiser, status="planning", capacity_needed=100)
+        event = db.session.get(Event, event_id)
+        event.equipment_requirements.append(
+            EventEquipmentRequirement(equipment_type="Projector", quantity=1)
+        )
+        booking = _create_venue_booking(event, organiser)
+
+        venue_booking.approve_booking(booking, decided_by=coordinator)
+
+        assert event.status == "planning"
+
+
+def test_last_equipment_reservation_moves_event_to_safety_check(
+    app, organiser, coordinator, make_event
+):
+    with app.app_context():
+        event_id = make_event(organiser, status="planning", capacity_needed=100)
+        event = db.session.get(Event, event_id)
+        requirement = EventEquipmentRequirement(equipment_type="Projector", quantity=2)
+        event.equipment_requirements.append(requirement)
+        booking = _create_venue_booking(event, organiser, status="approved")
+        item = EquipmentItem(name="Projector", total_quantity=5)
+        db.session.add(item)
+        db.session.commit()
+
+        equipment_reservation.reserve(
+            event,
+            requirement,
+            item,
+            booking.start_datetime,
+            booking.end_datetime,
+            organiser,
+        )
+
+        assert event.status == "safety_check"
+
+
+def test_only_safety_officer_approval_confirms_event(app, organiser, make_user, make_event):
+    with app.app_context():
+        officer_id = make_user("safety@test.com", ["safety_officer"])
+        officer = db.session.get(User, officer_id)
+        event_id = make_event(organiser, status="safety_check")
+        event = db.session.get(Event, event_id)
+
+        safety.review_safety_check(
+            event,
+            officer,
+            "approved",
+            "Egress and access reviewed",
+            assessed_factors=sorted(safety.SAFETY_FACTORS),
+        )
+
+        assert event.status == "confirmed"
+        review_record = EventSafetyReview.query.filter_by(event_id=event_id).one()
+        assert review_record.decision == "approved"
+        assert review_record.safety_officer_id == officer_id
+        assert event.to_dict()["safetyReviews"][0]["comments"] == "Egress and access reviewed"
+
+
+@pytest.mark.parametrize("decision", ["rejected", "changes_requested"])
+def test_safety_rejection_or_change_request_returns_event_to_planning(
+    app, organiser, make_user, make_event, decision
+):
+    with app.app_context():
+        officer_id = make_user(f"safety-{decision}@test.com", ["safety_officer"])
+        officer = db.session.get(User, officer_id)
+        event_id = make_event(organiser, status="safety_check")
+        event = db.session.get(Event, event_id)
+
+        safety.review_safety_check(
+            event,
+            officer,
+            decision,
+            "Adjust emergency access",
+            assessed_factors=["emergency_access"],
+            concern_factors=["emergency_access"],
+            affected_arrangements=["venue"],
+        )
+
+        assert event.status == "planning"
+        assert EventSafetyReview.query.filter_by(event_id=event_id, decision=decision).count() == 1
+
+
+def test_non_safety_user_cannot_approve_safety_check(app, organiser, coordinator, make_event):
+    with app.app_context():
+        event_id = make_event(organiser, status="safety_check")
+        event = db.session.get(Event, event_id)
+        coordinator_user = db.session.get(User, coordinator)
+
+        with pytest.raises(PermissionError, match="Only a Safety Officer"):
+            safety.review_safety_check(event, coordinator_user, "approved")
+
+
+def test_safety_officer_cannot_review_event_before_arrangements_reach_safety_check(
+    app, organiser, make_user, make_event
+):
+    with app.app_context():
+        officer_id = make_user("early-safety@test.com", ["safety_officer"])
+        officer = db.session.get(User, officer_id)
+        event_id = make_event(organiser, status="planning")
+        event = db.session.get(Event, event_id)
+
+        with pytest.raises(ValueError, match="awaiting a safety check"):
+            safety.review_safety_check(event, officer, "approved")
+
+
+def test_safety_review_api_confirms_only_after_safety_officer_approval(
+    client, auth_header, organiser, make_user, make_event
+):
+    make_user("safety-api@test.com", ["safety_officer"])
+    event_id = make_event(organiser, status="safety_check")
+
+    response = client.post(
+        f"/api/events/{event_id}/safety-review",
+        headers=auth_header("safety-api@test.com"),
+        json={
+            "decision": "approved",
+            "comments": "Emergency access checked",
+            "assessedFactors": sorted(safety.SAFETY_FACTORS),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "confirmed"
+
+
+def test_coordinator_cannot_bypass_safety_review_with_generic_status_endpoint(
+    client, auth_header, organiser, coordinator, make_event
+):
+    event_id = make_event(organiser, status="safety_check", coordinator_id=coordinator)
+
+    response = client.post(
+        f"/api/events/{event_id}/status",
+        headers=auth_header(COORD),
+        json={"status": "confirmed", "reason": "Trying to bypass safety review"},
+    )
+
+    assert response.status_code == 400
+    with client.application.app_context():
+        event = db.session.get(Event, event_id)
+        assert event.status == "safety_check"
+        assert EventStatusHistory.query.filter_by(
+            event_id=event_id, new_status="confirmed"
+        ).count() == 0
+
+
+def test_cancelling_approved_venue_reverts_confirmed_event_to_planning(
+    app, organiser, coordinator, make_event
+):
+    with app.app_context():
+        event_id = make_event(organiser, status="confirmed", capacity_needed=100)
+        event = db.session.get(Event, event_id)
+        booking = _create_venue_booking(event, organiser, status="approved")
+
+        venue_booking.cancel_booking(booking, decided_by=coordinator, reason="Venue unavailable")
+
+        assert booking.status == "cancelled"
+        assert event.status == "planning"
+        history = EventStatusHistory.query.filter_by(
+            event_id=event_id, new_status="planning"
+        ).one()
+        assert "venue booking" in history.reason.lower()
+
+
+def test_venue_staff_can_cancel_booking_through_api(
+    client, auth_header, organiser, make_user, make_event
+):
+    venue_staff_id = make_user("venue-staff@test.com", ["venue_staff"])
+    event_id = make_event(organiser, status="confirmed", capacity_needed=100)
+
+    with client.application.app_context():
+        event = db.session.get(Event, event_id)
+        booking = _create_venue_booking(event, organiser, status="approved")
+        booking_id = booking.id
+
+    response = client.post(
+        f"/api/venues/bookings/{booking_id}/cancel",
+        headers=auth_header("venue-staff@test.com"),
+        json={"reason": "Venue maintenance"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["status"] == "cancelled"
+    with client.application.app_context():
+        assert db.session.get(Event, event_id).status == "planning"
+
+
+def test_rechecking_ready_event_does_not_duplicate_safety_transition_history(
+    app, organiser, make_event
+):
+    with app.app_context():
+        event_id = make_event(organiser, status="planning")
+        event = db.session.get(Event, event_id)
+
+        status_service.try_advance_to_safety_check(event, changed_by_id=organiser)
+        status_service.try_advance_to_safety_check(event, changed_by_id=organiser)
+
+        assert event.status == "safety_check"
+        assert EventStatusHistory.query.filter_by(
+            event_id=event_id, new_status="safety_check"
+        ).count() == 1
+
+
+def test_released_equipment_is_not_counted_as_reserved(app, organiser, make_event):
+    with app.app_context():
+        event_id = make_event(organiser, status="planning")
+        event = db.session.get(Event, event_id)
+        requirement = EventEquipmentRequirement(equipment_type="Projector", quantity=1)
+        event.equipment_requirements.append(requirement)
+        db.session.flush()
+        item = EquipmentItem(name="Projector", total_quantity=2)
+        db.session.add(item)
+        db.session.flush()
+        record = EquipmentReservation(
+            event_id=event_id,
+            equipment_requirement_id=requirement.id,
+            equipment_item_id=item.id,
+            quantity=1,
+            start_datetime=utcnow() + timedelta(days=30),
+            end_datetime=utcnow() + timedelta(days=30, hours=1),
+            status="released",
+        )
+        db.session.add(record)
+        db.session.commit()
+
+        status_service.try_advance_to_safety_check(event, changed_by_id=organiser)
+
+        assert event.status == "planning"
