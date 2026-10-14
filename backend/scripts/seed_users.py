@@ -34,6 +34,7 @@ TEST_USERS = [
     {"name": "Priya Coordinator", "email": "coordinator2@example.com", "roles": ["event_coordinator"]},
     {"name": "Vince Venue", "email": "venue@example.com", "roles": ["venue_staff"]},
     {"name": "Tara TechSupport", "email": "techsupport@example.com", "roles": ["technical_support_staff"]},
+    {"name": "Sam Safety Officer", "email": "safety@example.com", "roles": ["safety_officer"]},
     {"name": "Alex Attendee", "email": "attendee@example.com", "roles": ["attendee"]},
 ]
 

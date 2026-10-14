@@ -35,7 +35,7 @@ CREATE TABLE users (
 CREATE TABLE roles (
     id              TINYINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     name            VARCHAR(50) NOT NULL UNIQUE      -- event_organiser, event_coordinator,
-                                                       -- venue_staff, technical_support_staff, attendee
+                                                       -- venue_staff, technical_support_staff, safety_officer, attendee
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
 CREATE TABLE user_roles (
@@ -76,7 +76,7 @@ CREATE TABLE events (
 
     status ENUM(
         'draft','submitted','under_review','approved',
-        'planning','confirmed','completed','cancelled','rejected'
+        'planning','safety_check','confirmed','completed','cancelled','rejected'
     ) NOT NULL DEFAULT 'draft',
 
     proposed_date           DATE NULL,
@@ -187,6 +187,21 @@ CREATE TABLE event_status_history (
     INDEX idx_esh_event (event_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE event_safety_reviews (
+    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id            BIGINT UNSIGNED NOT NULL,
+    safety_officer_id   BIGINT UNSIGNED NOT NULL,
+    decision            ENUM('approved','rejected','changes_requested') NOT NULL,
+    comments            TEXT NULL,
+    assessed_factors    JSON NOT NULL,
+    concern_factors     JSON NOT NULL,
+    affected_arrangements JSON NOT NULL,
+    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_esr_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+    CONSTRAINT fk_esr_safety_officer FOREIGN KEY (safety_officer_id) REFERENCES users(id),
+    INDEX idx_esr_event (event_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 ALTER TABLE event_status_history
 ADD COLUMN affected_fields JSON NULL;
 
@@ -285,7 +300,7 @@ CREATE TABLE venue_bookings (
     event_id            BIGINT UNSIGNED NOT NULL,
     venue_id            BIGINT UNSIGNED NOT NULL,
     requested_by        BIGINT UNSIGNED NOT NULL,       -- Event Coordinator
-    status              ENUM('pending','approved','rejected','withdrawn') NOT NULL DEFAULT 'pending',
+    status              ENUM('pending','approved','rejected','withdrawn','cancelled') NOT NULL DEFAULT 'pending',
     start_datetime      DATETIME NOT NULL,
     end_datetime        DATETIME NOT NULL,
     decision_reason     TEXT NULL,
@@ -326,12 +341,12 @@ CREATE TABLE venue_availability_flags (
 -- Equipment Availability Checking / Reservation (catalogue side)
 -- ---------------------------------------------------------------------
 
-CREATE TABLE equipment (
+CREATE TABLE equipment_items (
     id              BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    name            VARCHAR(150) NOT NULL,
+    name            VARCHAR(150) NOT NULL UNIQUE,
+    category        VARCHAR(100) NULL,
     total_quantity  INT UNSIGNED NOT NULL,
-    status          ENUM('available','maintenance') NOT NULL DEFAULT 'available',
-    notes           TEXT NULL,
+    status          ENUM('active','maintenance','retired') NOT NULL DEFAULT 'active',
     created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
@@ -339,18 +354,19 @@ CREATE TABLE equipment (
 CREATE TABLE equipment_reservations (
     id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     event_id            BIGINT UNSIGNED NOT NULL,
-    equipment_id        BIGINT UNSIGNED NOT NULL,
-    quantity_reserved   INT UNSIGNED NOT NULL,
+    equipment_requirement_id BIGINT UNSIGNED NULL,
+    equipment_item_id   BIGINT UNSIGNED NOT NULL,
+    quantity            INT UNSIGNED NOT NULL,
     status              ENUM('reserved','released') NOT NULL DEFAULT 'reserved',
-    reserved_by         BIGINT UNSIGNED NOT NULL,       -- Technical Support Staff
+    created_by          BIGINT UNSIGNED NULL,           -- Technical Support Staff
     start_datetime      DATETIME NOT NULL,
     end_datetime        DATETIME NOT NULL,
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_eres_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
-    CONSTRAINT fk_eres_equipment FOREIGN KEY (equipment_id) REFERENCES equipment(id),
-    CONSTRAINT fk_eres_reserved_by FOREIGN KEY (reserved_by) REFERENCES users(id),
-    INDEX idx_eres_equipment_dates (equipment_id, start_datetime, end_datetime),
+    CONSTRAINT fk_eres_requirement FOREIGN KEY (equipment_requirement_id) REFERENCES event_equipment_requirements(id) ON DELETE SET NULL,
+    CONSTRAINT fk_eres_equipment FOREIGN KEY (equipment_item_id) REFERENCES equipment_items(id),
+    CONSTRAINT fk_eres_created_by FOREIGN KEY (created_by) REFERENCES users(id),
+    INDEX idx_eres_equipment_dates (equipment_item_id, start_datetime, end_datetime),
     INDEX idx_eres_event (event_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
@@ -436,6 +452,7 @@ INSERT INTO roles (name) VALUES
     ('event_coordinator'),
     ('venue_staff'),
     ('technical_support_staff'),
+    ('safety_officer'),
     ('attendee');
 
 SET FOREIGN_KEY_CHECKS = 1;
