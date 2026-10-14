@@ -46,4 +46,7 @@ export default {
   getMyBookings: () => apiClient.get("/venues/bookings/my"),
   withdrawBooking: (bookingId) =>
     apiClient.post(`/venues/bookings/${bookingId}/withdraw`),
+
+  // Venue Staff: Get pending booking requests
+  getPendingBookings: () => apiClient.get("/venues/bookings/pending"),
 };

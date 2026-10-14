@@ -480,8 +480,43 @@ def get_my_booking_requests():
 @venues_bp.get("/bookings/pending")
 @roles_required("venue_staff")
 def list_pending_bookings():
-    pending = VenueBooking.query.filter_by(status="pending").order_by(VenueBooking.created_at.asc()).all()
-    return jsonify([b.to_dict() for b in pending]), 200
+    user = _current_user()
+
+    pending = (
+        VenueBooking.query
+        .join(Venue, VenueBooking.venue_id == Venue.id)
+        .filter(
+            VenueBooking.status == "pending",
+            Venue.created_by == user.id,
+        )
+        .order_by(
+            VenueBooking.start_datetime.asc(),
+            VenueBooking.id.asc(),
+        )
+        .all()
+    )
+
+    results = []
+
+    for booking in pending:
+        data = booking.to_dict()
+
+        event = booking.event
+        venue = booking.venue
+
+        data.update({
+            "eventName": event.name if event else None,
+            "eventDescription": event.description if event else None,
+            "expectedAttendance": (
+                event.expected_attendance if event else None
+            ),
+            "venueName": venue.name if venue else None,
+            "venueLocation": venue.location if venue else None,
+        })
+
+        results.append(data)
+
+    return jsonify(results), 200
 
 
 @venues_bp.post("/bookings/<int:booking_id>/approve")
