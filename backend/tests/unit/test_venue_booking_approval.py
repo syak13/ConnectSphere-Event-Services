@@ -290,3 +290,198 @@ def test_approve_unauthenticated_cannot_approve(client, approve_context):
 def test_approve_missing_booking_returns_404(client, approve_context):
     response = approve_request(client, approve_context, 99999999)
     assert response.status_code == 404
+
+# STORY 3: Venue Staff reject a booking request (optional reason/suggestion)
+
+def reject_request(client, ctx, booking_id, payload=None, headers=None):
+    return client.post(
+        f'/api/venues/bookings/{booking_id}/reject',
+        json={} if payload is None else payload,
+        headers=headers if headers is not None else ctx.staff_headers,
+    )
+
+
+def rejection_notices(client, ctx, headers=None):
+    return client.get(
+        '/api/venues/bookings/rejection-notices',
+        headers=headers if headers is not None else ctx.coordinator_headers,
+    )
+
+
+# AC1: Both optional fields can be omitted, and coordinator is notified.
+def test_reject_ac1_without_reason_or_alternative(client, approve_context):
+    booking_id = add_approval_booking(approve_context)
+    response = reject_request(client, approve_context, booking_id)
+    assert response.status_code == 200
+    assert response.get_json()['status'] == 'rejected'
+    db.session.expire_all()
+    saved = db.session.get(VenueBooking, booking_id)
+    assert saved.status == 'rejected'
+    assert saved.decided_by == approve_context.staff
+    assert saved.decided_at is not None
+    assert saved.decision_reason is None
+    assert saved.alternative_suggestion is None
+    notice_response = rejection_notices(client, approve_context)
+    assert notice_response.status_code == 200
+    notice = next(n for n in notice_response.get_json() if n['bookingId'] == booking_id)
+    assert notice['reason'] is None
+    assert notice['alternativeSuggestion'] is None
+    assert notice['rejectedAt'] is not None
+
+
+# AC1: Explicitly blank strings are accepted too.
+def test_reject_ac1_blank_fields_are_accepted(client, approve_context):
+    booking_id = add_approval_booking(approve_context)
+    response = reject_request(client, approve_context, booking_id,
+                              {'reason': '', 'alternativeSuggestion': '   '})
+    assert response.status_code == 200
+    db.session.expire_all()
+    saved = db.session.get(VenueBooking, booking_id)
+    assert saved.decision_reason is None
+    assert saved.alternative_suggestion is None
+
+
+# AC2: Reason is saved and visible in both request details and notification.
+def test_reject_ac2_reason_visible_to_coordinator(client, approve_context):
+    booking_id = add_approval_booking(approve_context)
+    reason = 'Venue is undergoing maintenance.'
+    response = reject_request(client, approve_context, booking_id, {'reason': reason})
+    assert response.status_code == 200
+    assert response.get_json()['decisionReason'] == reason
+    requests_response = client.get('/api/venues/bookings/my',
+                                   headers=approve_context.coordinator_headers)
+    assert requests_response.status_code == 200
+    item = next(b for b in requests_response.get_json() if b['id'] == booking_id)
+    assert item['status'] == 'rejected'
+    assert item['decisionReason'] == reason
+    notice = next(n for n in rejection_notices(client, approve_context).get_json()
+                  if n['bookingId'] == booking_id)
+    assert notice['reason'] == reason
+
+
+# AC3: Alternative suggestion is saved and visible with the rejection.
+def test_reject_ac3_alternative_visible_to_coordinator(client, approve_context):
+    booking_id = add_approval_booking(approve_context)
+    suggestion = 'Try the other hall on Friday.'
+    response = reject_request(client, approve_context, booking_id,
+                              {'alternativeSuggestion': suggestion})
+    assert response.status_code == 200
+    assert response.get_json()['alternativeSuggestion'] == suggestion
+    requests_response = client.get('/api/venues/bookings/my',
+                                   headers=approve_context.coordinator_headers)
+    item = next(b for b in requests_response.get_json() if b['id'] == booking_id)
+    assert item['status'] == 'rejected'
+    assert item['alternativeSuggestion'] == suggestion
+    notice = next(n for n in rejection_notices(client, approve_context).get_json()
+                  if n['bookingId'] == booking_id)
+    assert notice['alternativeSuggestion'] == suggestion
+
+
+# AC3: Both reason and alternative can be submitted together.
+def test_reject_ac3_reason_and_alternative_together(client, approve_context):
+    booking_id = add_approval_booking(approve_context)
+    payload = {'reason': 'Not available.', 'alternativeSuggestion': 'Try next Tuesday.'}
+    response = reject_request(client, approve_context, booking_id, payload)
+    assert response.status_code == 200
+    assert response.get_json()['decisionReason'] == payload['reason']
+    assert response.get_json()['alternativeSuggestion'] == payload['alternativeSuggestion']
+    notice = next(n for n in rejection_notices(client, approve_context).get_json()
+                  if n['bookingId'] == booking_id)
+    assert notice['reason'] == payload['reason']
+    assert notice['alternativeSuggestion'] == payload['alternativeSuggestion']
+
+
+# AC4: Rejected booking is excluded from confirmed calendar.
+def test_reject_ac4_not_shown_in_confirmed_calendar(client, approve_context):
+    booking_id = add_approval_booking(approve_context)
+    approved_id = add_approval_booking(approve_context, start=at(31), end=at(31, 12), status='approved')
+    assert reject_request(client, approve_context, booking_id).status_code == 200
+    response = get_approval_calendar(client, approve_context, at(29), at(33))
+    assert response.status_code == 200
+    ids = [b['id'] for b in response.get_json()['confirmedBookings']]
+    assert booking_id not in ids
+    assert approved_id in ids
+
+
+# AC5: Each text field has a maximum of 500 characters.
+@pytest.mark.parametrize('field', ['reason', 'alternativeSuggestion'])
+def test_reject_ac5_more_than_500_characters_blocked(client, approve_context, field):
+    booking_id = add_approval_booking(approve_context)
+    response = reject_request(client, approve_context, booking_id, {field: 'x' * 501})
+    assert response.status_code == 400
+    assert '500' in response.get_json()['error']
+    db.session.expire_all()
+    assert db.session.get(VenueBooking, booking_id).status == 'pending'
+
+
+@pytest.mark.parametrize('field', ['reason', 'alternativeSuggestion'])
+def test_reject_ac5_exactly_500_characters_accepted(client, approve_context, field):
+    booking_id = add_approval_booking(approve_context)
+    response = reject_request(client, approve_context, booking_id, {field: 'x' * 500})
+    assert response.status_code == 200
+    assert response.get_json()['status'] == 'rejected'
+
+
+# Security and error handling.
+def test_reject_staff_cannot_reject_another_staff_venue(client, approve_context):
+    booking_id = add_approval_booking(approve_context, venue=approve_context.other_venue)
+    response = reject_request(client, approve_context, booking_id)
+    assert response.status_code == 403
+    db.session.expire_all()
+    assert db.session.get(VenueBooking, booking_id).status == 'pending'
+
+
+@pytest.mark.parametrize('status', ['approved', 'rejected', 'withdrawn'])
+def test_reject_already_decided_request_returns_conflict(client, approve_context, status):
+    booking_id = add_approval_booking(approve_context, status=status)
+    response = reject_request(client, approve_context, booking_id)
+    assert response.status_code == 409
+    db.session.expire_all()
+    assert db.session.get(VenueBooking, booking_id).status == status
+
+
+def test_reject_second_decision_cannot_overwrite_first(client, approve_context):
+    booking_id = add_approval_booking(approve_context)
+    assert reject_request(client, approve_context, booking_id,
+                          {'reason': 'First decision'}).status_code == 200
+    response = reject_request(client, approve_context, booking_id,
+                              {'reason': 'Second decision'})
+    assert response.status_code == 409
+    db.session.expire_all()
+    assert db.session.get(VenueBooking, booking_id).decision_reason == 'First decision'
+
+
+def test_reject_coordinator_cannot_reject(client, approve_context):
+    booking_id = add_approval_booking(approve_context)
+    response = reject_request(client, approve_context, booking_id,
+                              headers=approve_context.coordinator_headers)
+    assert response.status_code == 403
+
+
+def test_reject_unauthenticated_cannot_reject(client, approve_context):
+    booking_id = add_approval_booking(approve_context)
+    response = client.post(f'/api/venues/bookings/{booking_id}/reject', json={})
+    assert response.status_code in (401, 422)
+
+
+def test_reject_missing_booking_returns_404(client, approve_context):
+    response = reject_request(client, approve_context, 99999999)
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize('field', ['reason', 'alternativeSuggestion'])
+def test_reject_non_text_field_returns_400(client, approve_context, field):
+    booking_id = add_approval_booking(approve_context)
+    response = reject_request(client, approve_context, booking_id, {field: 123})
+    assert response.status_code == 400
+    db.session.expire_all()
+    assert db.session.get(VenueBooking, booking_id).status == 'pending'
+
+
+def test_reject_notices_are_private_to_requesting_coordinator(client, approve_context):
+    booking_id = add_approval_booking(approve_context)
+    assert reject_request(client, approve_context, booking_id).status_code == 200
+    other_response = rejection_notices(client, approve_context,
+                                       headers=approve_context.other_coordinator_headers)
+    assert other_response.status_code == 200
+    assert booking_id not in [n['bookingId'] for n in other_response.get_json()]

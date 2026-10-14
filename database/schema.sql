@@ -275,32 +275,64 @@ CREATE TABLE venue_unavailability (
     INDEX idx_vu_venue_dates (venue_id, start_datetime, end_datetime)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+
 -- ---------------------------------------------------------------------
--- Venue Booking Request / Approval / Conflict Detection
+-- Venue Booking Request / Approval / Rejection / Conflict Detection
 -- Resubmission after rejection = new row (audit-friendly)
 -- ---------------------------------------------------------------------
 
 CREATE TABLE venue_bookings (
-    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-    event_id            BIGINT UNSIGNED NOT NULL,
-    venue_id            BIGINT UNSIGNED NOT NULL,
-    requested_by        BIGINT UNSIGNED NOT NULL,       -- Event Coordinator
-    status              ENUM('pending','approved','rejected','withdrawn') NOT NULL DEFAULT 'pending',
-    start_datetime      DATETIME NOT NULL,
-    end_datetime        DATETIME NOT NULL,
-    decision_reason     TEXT NULL,
-    decided_by          BIGINT UNSIGNED NULL,
-    decided_at          DATETIME NULL,
-    created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    CONSTRAINT fk_vb_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
-    CONSTRAINT fk_vb_venue FOREIGN KEY (venue_id) REFERENCES venues(id),
-    CONSTRAINT fk_vb_requested_by FOREIGN KEY (requested_by) REFERENCES users(id),
-    CONSTRAINT fk_vb_decided_by FOREIGN KEY (decided_by) REFERENCES users(id),
+    id                     BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id               BIGINT UNSIGNED NOT NULL,
+    venue_id               BIGINT UNSIGNED NOT NULL,
+    requested_by           BIGINT UNSIGNED NOT NULL, -- Event Coordinator
+
+    status                 ENUM(
+                               'pending',
+                               'approved',
+                               'rejected',
+                               'withdrawn'
+                           ) NOT NULL DEFAULT 'pending',
+
+    start_datetime         DATETIME NOT NULL,
+    end_datetime           DATETIME NOT NULL,
+
+    decision_reason        TEXT NULL,
+    alternative_suggestion TEXT NULL,
+
+    decided_by             BIGINT UNSIGNED NULL,
+    decided_at             DATETIME NULL,
+
+    created_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at             DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+                           ON UPDATE CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_vb_event
+        FOREIGN KEY (event_id)
+        REFERENCES events(id)
+        ON DELETE CASCADE,
+
+    CONSTRAINT fk_vb_venue
+        FOREIGN KEY (venue_id)
+        REFERENCES venues(id),
+
+    CONSTRAINT fk_vb_requested_by
+        FOREIGN KEY (requested_by)
+        REFERENCES users(id),
+
+    CONSTRAINT fk_vb_decided_by
+        FOREIGN KEY (decided_by)
+        REFERENCES users(id),
+
     INDEX idx_vb_event (event_id),
-    INDEX idx_vb_venue_dates (venue_id, start_datetime, end_datetime),
+    INDEX idx_vb_venue_dates (
+        venue_id,
+        start_datetime,
+        end_datetime
+    ),
     INDEX idx_vb_status (status)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 
 
 -- ---------------------------------------------------------------------

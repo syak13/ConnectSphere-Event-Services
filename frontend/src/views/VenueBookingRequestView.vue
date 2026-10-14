@@ -146,6 +146,15 @@
         </p>
       </div>
 
+      <!-- Rejection notices derived from rejected bookings -->
+      <div v-if="rejectionNotices.length" class="rejection-notices" role="status">
+        <div v-for="notice in rejectionNotices" :key="notice.bookingId" class="rejection-notice">
+          <strong>{{ notice.message }}</strong>
+          <p v-if="notice.reason"><strong>Reason:</strong> {{ notice.reason }}</p>
+          <p v-if="notice.alternativeSuggestion"><strong>Alternative suggestion:</strong> {{ notice.alternativeSuggestion }}</p>
+        </div>
+      </div>
+
       <p v-if="statusError" class="error-message" role="alert">{{ statusError }}</p>
       <p v-if="withdrawNotice" class="success-message" role="status">{{ withdrawNotice }}</p>
       <p v-if="statusLoading" class="status-message">Loading booking requests...</p>
@@ -172,6 +181,9 @@
           </div>
           <p v-if="booking.status === 'rejected' && booking.decisionReason" class="rejection-reason">
             <strong>Reason for rejection:</strong> {{ booking.decisionReason }}
+          </p>
+          <p v-if="booking.status === 'rejected' && booking.alternativeSuggestion" class="rejection-reason">
+            <strong>Alternative suggestion:</strong> {{ booking.alternativeSuggestion }}
           </p>
           <div v-if="booking.status === 'pending'" class="booking-actions">
             <button type="button" class="btn withdraw-btn" :disabled="withdrawingId === booking.id"
@@ -223,6 +235,7 @@ const successMessage = ref("");
 
 const myBookings = ref([]);
 const confirmationNotices = ref([]);
+const rejectionNotices = ref([]);
 const statusLoading = ref(false);
 const statusError = ref("");
 const bookingToWithdraw = ref(null);
@@ -341,6 +354,16 @@ async function loadConfirmationNotices() {
   }
 }
 
+async function loadRejectionNotices() {
+  try {
+    const { data } = await venuesApi.getRejectionNotices();
+    rejectionNotices.value = Array.isArray(data) ? data : [];
+  } catch (error) {
+    rejectionNotices.value = [];
+    console.error("Unable to load booking rejections", error);
+  }
+}
+
 async function loadMyBookings() {
   statusLoading.value = true;
   statusError.value = "";
@@ -348,7 +371,7 @@ async function loadMyBookings() {
   try {
     const response = await venuesApi.getMyBookings();
     myBookings.value = response.data;
-    await loadConfirmationNotices();
+    await Promise.all([loadConfirmationNotices(), loadRejectionNotices()]);
   } catch (error) {
     myBookings.value = []; // Never display outdated statuses after a failed refresh.
     statusError.value =
@@ -455,6 +478,9 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.rejection-notices { margin: 0 0 1rem; padding: .8rem 1rem; border: 1px solid #f3b4c4; border-radius: 10px; background: #fde8ee; color: #a12b47; }
+.rejection-notice + .rejection-notice { border-top: 1px solid #f3b4c4; margin-top: .7rem; padding-top: .7rem; }
+.rejection-notice p { margin: .4rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .confirmation-notices {
   margin: 0 0 1rem;
   padding: .8rem 1rem;

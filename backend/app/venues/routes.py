@@ -472,6 +472,7 @@ def get_my_booking_requests():
                 if booking.created_at else None
             ),
             "decisionReason": booking.decision_reason,
+            "alternativeSuggestion": booking.alternative_suggestion,
         })
 
     return jsonify(results), 200
@@ -494,6 +495,26 @@ def booking_confirmation_notices():
                    f"for {b.event.name if b.event else 'your event'}.",
         "confirmedAt": b.decided_at.isoformat() if b.decided_at else None,
     } for b in approved]), 200
+
+
+@venues_bp.get("/bookings/rejection-notices")
+@roles_required("event_coordinator")
+def booking_rejection_notices():
+    """In-app rejection notices derived from saved booking decisions."""
+    user = _current_user()
+    rejected = (VenueBooking.query
+                .filter(VenueBooking.requested_by == user.id,
+                        VenueBooking.status == "rejected")
+                .order_by(VenueBooking.decided_at.desc()).all())
+    return jsonify([{
+        "bookingId": b.id,
+        "eventId": b.event_id,
+        "message": f"Venue booking rejected: {b.venue.name if b.venue else 'Venue'} "
+                   f"for {b.event.name if b.event else 'your event'}.",
+        "reason": b.decision_reason,
+        "alternativeSuggestion": b.alternative_suggestion,
+        "rejectedAt": b.decided_at.isoformat() if b.decided_at else None,
+    } for b in rejected]), 200
 
 
 @venues_bp.get("/bookings/pending")
@@ -561,9 +582,22 @@ def reject_booking(booking_id):
     record = VenueBooking.query.get(booking_id)
     if not record:
         return jsonify({"error": "Booking not found"}), 404
-    data = request.get_json() or {}
+    data = request.get_json(silent=True)
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
     try:
-        result = booking.reject_booking(record, user.id, data.get("reason"))
+        result = booking.reject_booking(
+            record,
+            user.id,
+            reason=data.get("reason"),
+            alternative=data.get("alternativeSuggestion"),
+        )
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
     except ValueError as e:
-        return jsonify({"error": str(e)}), 400
+        message = str(e)
+        status = 409 if "already been decided" in message else 400
+        return jsonify({"error": message}), status
     return jsonify(result.to_dict()), 200
