@@ -2,7 +2,7 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from app.auth.decorators import roles_required
-from app.events.services import assignment, drafts, review
+from app.events.services import assignment, drafts, review, safety
 from app.events.services import status as status_service
 from app.models.event import Event
 from app.models.user import User
@@ -36,10 +36,7 @@ def _require_confirmation(event, data, action_label):
         409,
     )
 
-INTERNAL_ROLES = ("event_coordinator", "venue_staff", "technical_support_staff")
-
-
-INTERNAL_ROLES = ("event_coordinator", "venue_staff", "technical_support_staff")
+INTERNAL_ROLES = ("event_coordinator", "venue_staff", "technical_support_staff", "safety_officer")
 
 
 
@@ -184,7 +181,7 @@ def list_all_events():
     Support Staff can see all events for planning purposes, read-only unless
     they are the event's assigned Coordinator (Q&A #30/#34)."""
     user = _current_user()
-    if not any(user.has_role(r) for r in ("event_coordinator", "venue_staff", "technical_support_staff")):
+    if not any(user.has_role(r) for r in INTERNAL_ROLES):
         return jsonify({"error": "Forbidden"}), 403
     events = (
         Event.query.filter(Event.status != "draft")
@@ -582,6 +579,33 @@ def cancel_event_route(event_id):
         validate_descriptive_text(reason, "cancellation reason")
         event = status_service.change_status(event, "cancelled", user.id, reason)
     except (ValueError, status_service.InvalidTransitionError) as e:
+        return jsonify({"error": str(e)}), 400
+
+    return jsonify(event.to_dict()), 200
+
+
+@events_bp.post("/<int:event_id>/safety-review")
+@roles_required("safety_officer")
+def review_event_safety(event_id):
+    event = Event.query.get(event_id)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+
+    user = _current_user()
+    data = request.get_json() or {}
+    try:
+        event = safety.review_safety_check(
+            event,
+            user,
+            data.get("decision"),
+            data.get("comments"),
+            data.get("assessedFactors"),
+            data.get("concernFactors"),
+            data.get("affectedArrangements"),
+        )
+    except safety.SafetyReviewConflictError as e:
+        return jsonify({"error": str(e)}), 409
+    except ValueError as e:
         return jsonify({"error": str(e)}), 400
 
     return jsonify(event.to_dict()), 200
