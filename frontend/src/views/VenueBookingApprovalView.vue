@@ -92,17 +92,70 @@
             {{ booking.eventDescription }}
           </p>
 
+          <div class="booking-decision-actions">
           <button
             type="button"
-            class="btn-primary approve-btn"
-            :disabled="approvingId !== null"
+            class="btn-ghost approve-btn"
+            :disabled="approvingId !== null || rejectingId !== null"
             @click="openApprovalConfirmation(booking)"
           >
             {{ approvingId === booking.id ? "Approving..." : "Approve booking" }}
           </button>
+          <button type="button" class="btn-danger reject-btn"
+            :disabled="approvingId !== null || rejectingId !== null"
+            @click="openRejectionConfirmation(booking)">
+            {{ rejectingId === booking.id ? "Rejecting..." : "Reject booking" }}
+          </button>
+          </div>
         </article>
       </div>
     </template>
+
+    <!-- Rejection confirmation pop-up -->
+    <div v-if="bookingToReject" class="modal-backdrop" @click.self="cancelRejection">
+      <div class="confirmation-dialog rejection-dialog" role="dialog" aria-modal="true"
+        aria-labelledby="reject-dialog-title" aria-describedby="reject-dialog-description">
+        <h3 id="reject-dialog-title">Reject booking request?</h3>
+        <p id="reject-dialog-description">
+          Reject the request for
+          <strong>{{ bookingToReject.eventName || `Event #${bookingToReject.eventId}` }}</strong>
+          at <strong>{{ bookingToReject.venueName || `Venue #${bookingToReject.venueId}` }}</strong>?
+          Both fields below are optional.
+        </p>
+        <p class="dialog-time">
+          <strong>Start:</strong> {{ formatDate(bookingToReject.startDatetime) }} {{ formatTime(bookingToReject.startDatetime) }}
+          <br />
+          <strong>End:</strong> {{ formatDate(bookingToReject.endDatetime) }} {{ formatTime(bookingToReject.endDatetime) }}
+        </p>
+        <label class="rejection-label" for="rejection-reason">Reason for rejection (optional)</label>
+        <textarea id="rejection-reason" v-model="rejectionReason" rows="3"
+          placeholder="e.g. Venue unavailable due to maintenance"
+          :aria-invalid="rejectionReason.length > REJECTION_LIMIT" />
+        <p class="character-count" :class="{ 'over-limit': rejectionReason.length > REJECTION_LIMIT }">
+          {{ rejectionReason.length }}/{{ REJECTION_LIMIT }} characters
+        </p>
+        <label class="rejection-label" for="rejection-alternative">Alternative suggestion (optional)</label>
+        <textarea id="rejection-alternative" v-model="rejectionAlternative" rows="3"
+          placeholder="e.g. Consider another date or venue"
+          :aria-invalid="rejectionAlternative.length > REJECTION_LIMIT" />
+        <p class="character-count" :class="{ 'over-limit': rejectionAlternative.length > REJECTION_LIMIT }">
+          {{ rejectionAlternative.length }}/{{ REJECTION_LIMIT }} characters
+        </p>
+        <p v-if="rejectionOverLimit" class="field-error" role="alert">
+          Each field has a maximum of {{ REJECTION_LIMIT }} characters. Shorten the text to continue.
+        </p>
+        <p v-if="rejectionError" class="field-error" role="alert">{{ rejectionError }}</p>
+        <div class="confirmation-actions">
+          <button type="button" class="btn-primary secondary" :disabled="rejectingId !== null"
+            @click="cancelRejection">Cancel</button>
+          <button type="button" class="btn-danger reject-btn"
+            :disabled="rejectingId !== null || rejectionOverLimit"
+            @click="confirmRejection">
+            {{ rejectingId !== null ? "Rejecting..." : "Yes, Reject" }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- Approval confirmation pop-up -->
     <div
@@ -150,7 +203,7 @@
           <button
             type="button"
             class="btn-primary secondary"
-            :disabled="approvingId !== null"
+            :disabled="approvingId !== null || rejectingId !== null"
             @click="cancelApproval"
           >
             Cancel
@@ -159,7 +212,7 @@
           <button
             type="button"
             class="btn-primary"
-            :disabled="approvingId !== null"
+            :disabled="approvingId !== null || rejectingId !== null"
             @click="confirmApproval"
           >
             {{ approvingId !== null ? "Approving..." : "Yes, Approve" }}
@@ -171,7 +224,7 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import venuesApi from "../api/venues";
 
 const bookings = ref([]);
@@ -180,6 +233,17 @@ const error = ref("");
 const notice = ref("");
 const approvingId = ref(null);
 const bookingToApprove = ref(null);
+const REJECTION_LIMIT = 500;
+const bookingToReject = ref(null);
+const rejectingId = ref(null);
+const rejectionReason = ref("");
+const rejectionAlternative = ref("");
+const rejectionError = ref("");
+const rejectionOverLimit = computed(() =>
+  rejectionReason.value.length > REJECTION_LIMIT ||
+  rejectionAlternative.value.length > REJECTION_LIMIT
+);
+
 
 function formatDate(value) {
   if (!value) return "Not specified";
@@ -282,6 +346,51 @@ async function confirmApproval() {
     error.value = message;
   } finally {
     approvingId.value = null;
+  }
+}
+
+function openRejectionConfirmation(booking) {
+  if (approvingId.value !== null || rejectingId.value !== null || booking.status !== "pending") return;
+  bookingToReject.value = booking;
+  rejectionReason.value = "";
+  rejectionAlternative.value = "";
+  rejectionError.value = "";
+  error.value = "";
+  notice.value = "";
+}
+
+function cancelRejection() {
+  if (rejectingId.value !== null) return;
+  bookingToReject.value = null;
+  rejectionError.value = "";
+}
+
+async function confirmRejection() {
+  const current = bookingToReject.value;
+  if (!current || rejectingId.value !== null || rejectionOverLimit.value) return;
+  rejectingId.value = current.id;
+  rejectionError.value = "";
+  error.value = "";
+  notice.value = "";
+  try {
+    await venuesApi.rejectBooking(current.id, {
+      reason: rejectionReason.value.trim(),
+      alternativeSuggestion: rejectionAlternative.value.trim(),
+    });
+    bookingToReject.value = null;
+    await loadPendingBookings();
+    notice.value = "Booking rejected successfully. The Coordinator can view the decision and any feedback.";
+  } catch (err) {
+    const message = err.response?.data?.error || "Unable to reject this booking.";
+    if (err.response?.status === 409) {
+      bookingToReject.value = null;
+      await loadPendingBookings();
+      error.value = message;
+    } else {
+      rejectionError.value = message;
+    }
+  } finally {
+    rejectingId.value = null;
   }
 }
 
@@ -495,6 +604,27 @@ onMounted(loadPendingBookings);
 .btn-primary.secondary:hover {
   background: #ddd6fb;
 }
+
+.booking-decision-actions { display: flex; flex-wrap: wrap; gap: .65rem; margin-top: 1rem; }
+.booking-decision-actions .approve-btn { margin-top: 0; }
+/* Match Venue Catalogue Edit / Deactivate buttons */
+.btn-ghost, .btn-danger {
+  padding: 0.5rem 1.2rem;
+  border: none;
+  border-radius: 999px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+}
+.btn-ghost { background: var(--lilac-bg, #e9e5fb); color: var(--lilac-text, #4b3fa0); }
+.btn-danger { background: var(--rose-bg, #fde8ee); color: var(--rose-text, #a12b47); }
+.btn-ghost:disabled, .btn-danger:disabled { opacity: .6; cursor: not-allowed; }
+.btn-ghost:focus-visible, .btn-danger:focus-visible { outline: 2px solid var(--primary, #6d5bd0); outline-offset: 2px; }
+.rejection-dialog { max-height: calc(100vh - 2rem); overflow-y: auto; }
+.rejection-label { display: block; margin: .8rem 0 .35rem; font-weight: 600; color: var(--text, #2d2a4a); }
+.rejection-dialog textarea { box-sizing: border-box; width: 100%; padding: .7rem; border: 1px solid var(--border, #e4defa); border-radius: 8px; font: inherit; resize: vertical; }
+.character-count { margin: .25rem 0 .5rem; font-size: .8rem; color: var(--text-muted, #6b6890); text-align: right; }
+.character-count.over-limit { color: #a12b47; font-weight: 600; }
 
 @media (max-width: 560px) {
   .head {

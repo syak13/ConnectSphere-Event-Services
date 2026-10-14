@@ -26,11 +26,12 @@ def at(d, hour):
 
 @pytest.fixture()
 def make_venue(app):
-    def _make(name):
+    def _make(name, staff_id):
         venue = Venue(
             name=name,
             location="Test Location",
             capacity=100,
+            created_by=staff_id,
         )
         db.session.add(venue)
         db.session.commit()
@@ -46,21 +47,22 @@ def ctx(client, organiser, make_user, make_event, make_venue, auth_header):
         ["event_coordinator"],
     )
 
-    make_user(
+    staff_id = make_user(
         "staff@test.com",
         ["venue_staff"],
     )
 
     return SimpleNamespace(
         coord_id=coord_id,
+        staff_id=staff_id,
         coord=auth_header("coord@test.com"),
         staff=auth_header("staff@test.com"),
         event_id=make_event(
             organiser,
             coordinator_id=coord_id,
         ),
-        hall_a=make_venue("Hall A"),
-        hall_b=make_venue("Hall B"),
+        hall_a=make_venue("Hall A", staff_id),
+        hall_b=make_venue("Hall B", staff_id),
     )
 
 

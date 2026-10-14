@@ -205,6 +205,7 @@ class VenueBooking(db.Model):
     end_datetime = db.Column(db.DateTime, nullable=False)
 
     decision_reason = db.Column(db.Text, nullable=True)
+    alternative_suggestion = db.Column(db.String(500), nullable=True)
 
     decided_by = db.Column(
         db.BigInteger,
@@ -243,6 +244,7 @@ class VenueBooking(db.Model):
             "requestedBy": self.requested_by,
             "decidedBy": self.decided_by,
             "decisionReason": self.decision_reason,
+            "alternativeSuggestion": self.alternative_suggestion,
             "createdAt": (
                 self.created_at.isoformat()
                 if self.created_at
