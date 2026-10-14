@@ -440,6 +440,21 @@ def withdraw_booking(booking_id):
     return jsonify(result.to_dict()), 200
 
 
+@venues_bp.post("/bookings/<int:booking_id>/cancel")
+@roles_required("venue_staff")
+def cancel_booking(booking_id):
+    user = _current_user()
+    record = VenueBooking.query.get(booking_id)
+    if not record:
+        return jsonify({"error": "Booking not found"}), 404
+    data = request.get_json() or {}
+    try:
+        result = booking.cancel_booking(record, user.id, data.get("reason"))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify(result.to_dict()), 200
+
+
 @venues_bp.get("/bookings/my")
 @roles_required("event_coordinator")
 def get_my_booking_requests():

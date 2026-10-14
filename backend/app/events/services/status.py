@@ -12,7 +12,12 @@ from sqlalchemy import func
 from app.extensions import db
 from app.models.equipment import EquipmentReservation
 from app.models.event import Event, EventSafetyReview, EventStatusHistory
-from app.models.venue import BOOKING_APPROVED, VenueBooking
+from app.models.venue import (
+    BOOKING_APPROVED,
+    BOOKING_CANCELLED,
+    BOOKING_WITHDRAWN,
+    VenueBooking,
+)
 
 ALLOWED_TRANSITIONS = {
     "draft": {"submitted"},
@@ -101,7 +106,14 @@ def arrangements_are_complete(event: Event) -> bool:
     if venue_required or venue_bookings:
         if not any(booking.status == BOOKING_APPROVED for booking in venue_bookings):
             return False
-        if any(booking.status not in (BOOKING_APPROVED, "withdrawn") for booking in venue_bookings):
+        if any(
+            booking.status not in (
+                BOOKING_APPROVED,
+                BOOKING_WITHDRAWN,
+                BOOKING_CANCELLED,
+            )
+            for booking in venue_bookings
+        ):
             return False
 
     for requirement in event.equipment_requirements:
