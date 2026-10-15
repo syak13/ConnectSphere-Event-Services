@@ -88,7 +88,8 @@ def _has_active_booking(event_id, venue_id):
         VenueBooking.query.filter(
             VenueBooking.event_id == event_id,
             VenueBooking.venue_id == venue_id,
-            VenueBooking.status.in_(ACTIVE_STATUSES),
+            db.or_(VenueBooking.status.in_(("pending", "approved")),
+                    db.and_(VenueBooking.status == "held", VenueBooking.hold_expires_at > utcnow())),
         ).first()
         is not None
     )

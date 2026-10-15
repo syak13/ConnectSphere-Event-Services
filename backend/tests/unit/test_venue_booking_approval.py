@@ -1,10 +1,13 @@
 """AC tests for Venue Staff reviewing pending booking requests and approving them."""
+
 from datetime import datetime, time, timedelta
 from types import SimpleNamespace
 import pytest
+
 from app.common.time import utcnow
 from app.extensions import db
 from app.models.venue import Venue, VenueBooking
+
 URL = "/api/venues/bookings/pending"
 
 
@@ -244,6 +247,7 @@ def test_approve_ac4_back_to_back_bookings_do_not_overlap(client, approve_contex
 
 
 @pytest.mark.parametrize('decided_status', ['approved', 'rejected'])
+
 def test_approve_ac5_already_decided_request_cannot_be_approved(client, approve_context, decided_status):
     booking_id = add_approval_booking(approve_context, status=decided_status)
     response = approve_request(client, approve_context, booking_id)
@@ -393,6 +397,7 @@ def test_reject_ac4_not_shown_in_confirmed_calendar(client, approve_context):
 
 
 @pytest.mark.parametrize('field', ['reason', 'alternativeSuggestion'])
+
 def test_reject_ac5_more_than_500_characters_blocked(client, approve_context, field):
     booking_id = add_approval_booking(approve_context)
     response = reject_request(client, approve_context, booking_id, {field: 'x' * 501})
@@ -403,6 +408,7 @@ def test_reject_ac5_more_than_500_characters_blocked(client, approve_context, fi
 
 
 @pytest.mark.parametrize('field', ['reason', 'alternativeSuggestion'])
+
 def test_reject_ac5_exactly_500_characters_accepted(client, approve_context, field):
     booking_id = add_approval_booking(approve_context)
     response = reject_request(client, approve_context, booking_id, {field: 'x' * 500})
@@ -420,6 +426,7 @@ def test_reject_staff_cannot_reject_another_staff_venue(client, approve_context)
 
 
 @pytest.mark.parametrize('status', ['approved', 'rejected', 'withdrawn'])
+
 def test_reject_already_decided_request_returns_conflict(client, approve_context, status):
     booking_id = add_approval_booking(approve_context, status=status)
     response = reject_request(client, approve_context, booking_id)
@@ -458,6 +465,7 @@ def test_reject_missing_booking_returns_404(client, approve_context):
 
 
 @pytest.mark.parametrize('field', ['reason', 'alternativeSuggestion'])
+
 def test_reject_non_text_field_returns_400(client, approve_context, field):
     booking_id = add_approval_booking(approve_context)
     response = reject_request(client, approve_context, booking_id, {field: 123})
@@ -473,7 +481,6 @@ def test_reject_notices_are_private_to_requesting_coordinator(client, approve_co
                                        headers=approve_context.other_coordinator_headers)
     assert other_response.status_code == 200
     assert booking_id not in [n['bookingId'] for n in other_response.get_json()]
-
 
 # STORY 4: Resubmission after rejection counts as a new booking
 BASE = "/api/venues"
@@ -538,7 +545,7 @@ def create_rejected_booking(client, scenario):
 def fetch_booking(booking_id):
     db.session.expire_all()
     return db.session.get(VenueBooking, booking_id)
-# AC1: A new pending booking is created, visible in the venue staff queue.
+    # AC1: A new pending booking is created, visible in the venue staff queue.
 
 
 def test_ac1_resubmission_creates_new_pending_booking(client, scenario):
@@ -552,7 +559,7 @@ def test_ac1_resubmission_creates_new_pending_booking(client, scenario):
     queue = client.get(f"{BASE}/bookings/pending", headers=scenario.staff_a)
     assert queue.status_code == 200
     assert new_booking["id"] in {b["id"] for b in queue.get_json()}
-# AC2: The original remains rejected, with its reason and original values.
+    # AC2: The original remains rejected, with its reason and original values.
 
 
 def test_ac2_original_rejection_remains_unchanged(client, scenario):
@@ -568,7 +575,7 @@ def test_ac2_original_rejection_remains_unchanged(client, scenario):
     assert after == before
     assert original.status == "rejected"
     assert original.decision_reason == "Insufficient facilities"
-# AC3: Updated venue/date/time/requirements belong to the new row only.
+    # AC3: Updated venue/date/time/requirements belong to the new row only.
 
 
 def test_ac3_updated_details_are_saved_without_overwriting_original(client, scenario):
@@ -594,7 +601,7 @@ def test_ac3_updated_details_are_saved_without_overwriting_original(client, scen
         "Main hall", "Projector", "Tea", "Wheelchair access"
     )
     assert old.status == "rejected"
-# AC4: Identical details still create a distinct record.
+    # AC4: Identical details still create a distinct record.
 
 
 def test_ac4_identical_resubmission_creates_distinct_row(client, scenario):
@@ -608,7 +615,7 @@ def test_ac4_identical_resubmission_creates_distinct_row(client, scenario):
         new.venue_id, new.start_datetime, new.end_datetime
     )
     assert (old.status, new.status) == ("rejected", "pending")
-# AC5: The new venue's staff, not the old venue's staff, receives the request.
+    # AC5: The new venue's staff, not the old venue's staff, receives the request.
 
 
 def test_ac5_new_venue_staff_gets_resubmitted_request(client, scenario):
@@ -622,7 +629,7 @@ def test_ac5_new_venue_staff_gets_resubmitted_request(client, scenario):
     assert new_id not in {b["id"] for b in queue_a.get_json()}
     assert new_id in {b["id"] for b in queue_b.get_json()}
     assert fetch_booking(original_id).status == "rejected"
-# AC6: History contains separate entries and each retains its own status/reason.
+    # AC6: History contains separate entries and each retains its own status/reason.
 
 
 def test_ac6_history_lists_original_and_resubmission_separately(client, scenario):
@@ -638,7 +645,7 @@ def test_ac6_history_lists_original_and_resubmission_separately(client, scenario
     assert by_id[original_id]["decisionReason"] == "Insufficient facilities"
     assert by_id[new_id]["status"] == "pending"
     assert by_id[new_id]["decisionReason"] is None
-# Additional authorization check for the history endpoint.
+    # Additional authorization check for the history endpoint.
 
 
 def test_staff_history_only_shows_own_venues(client, scenario):
@@ -651,3 +658,175 @@ def test_staff_history_only_shows_own_venues(client, scenario):
     assert history_a.status_code == history_b.status_code == 200
     assert {b["id"] for b in history_a.get_json()} == {original_id}
     assert {b["id"] for b in history_b.get_json()} == {new_id}
+
+# STORY 5: Venue Staff place a tentative hold that expires
+
+from app.venues.services.booking import expire_due_holds
+
+
+def hold_expiry(hours=48):
+    """UTC expiry accepted by the hold API."""
+    return (utcnow() + timedelta(hours=hours)).replace(microsecond=0)
+
+
+def hold_request(client, ctx, booking_id, *, action="place", expiry=None, headers=None):
+    suffix = {
+        "place": "/hold",
+        "extend": "/hold/extend",
+        "release": "/hold/release",
+    }[action]
+    payload = {} if action == "release" else {
+        "expiresAt": (expiry or hold_expiry()).isoformat() + "Z"
+    }
+    return client.post(
+        f"/api/venues/bookings/{booking_id}{suffix}",
+        json=payload,
+        headers=headers or ctx.staff_headers,
+    )
+
+
+def test_hold_ac1_place_hold_with_future_expiry(client, context):
+    booking_id = add_booking(context)
+    expiry = hold_expiry()
+    response = hold_request(client, context, booking_id, expiry=expiry)
+    assert response.status_code == 200, response.get_json()
+    assert response.get_json()["status"] == "held"
+    db.session.expire_all()
+    saved = db.session.get(VenueBooking, booking_id)
+    assert saved.status == "held"
+    assert saved.hold_expires_at == expiry
+
+
+def test_hold_ac1_reject_past_expiry(client, context):
+    booking_id = add_booking(context)
+    response = hold_request(client, context, booking_id,
+                            expiry=hold_expiry(-1))
+    assert response.status_code == 400, response.get_json()
+    db.session.expire_all()
+    assert db.session.get(VenueBooking, booking_id).status == "pending"
+
+
+def test_hold_ac2_held_booking_appears_in_staff_queue(client, context):
+    booking_id = add_booking(context)
+    assert hold_request(client, context, booking_id).status_code == 200
+    response = client.get("/api/venues/bookings/pending",
+                          headers=context.staff_headers)
+    assert response.status_code == 200
+    item = next(b for b in response.get_json() if b["id"] == booking_id)
+    assert item["status"] == "held"
+    assert item["holdExpiresAt"] is not None
+
+
+def test_hold_ac2_held_booking_blocks_overlapping_approval(client, context):
+    first_id = add_booking(context)
+    second_id = add_booking(context)
+    assert hold_request(client, context, first_id).status_code == 200
+    response = client.post(f"/api/venues/bookings/{second_id}/approve",
+                           headers=context.staff_headers)
+    assert response.status_code == 409, response.get_json()
+    db.session.expire_all()
+    assert db.session.get(VenueBooking, second_id).status == "pending"
+
+
+def test_hold_ac3_approve_active_hold(client, context):
+    booking_id = add_booking(context)
+    assert hold_request(client, context, booking_id).status_code == 200
+    response = client.post(f"/api/venues/bookings/{booking_id}/approve",
+                           headers=context.staff_headers)
+    assert response.status_code == 200, response.get_json()
+    db.session.expire_all()
+    assert db.session.get(VenueBooking, booking_id).status == "approved"
+
+
+def test_hold_ac4_expiry_persists_and_does_not_delete_booking(client, context):
+    booking_id = add_booking(context)
+    assert hold_request(client, context, booking_id).status_code == 200
+    saved = db.session.get(VenueBooking, booking_id)
+    saved.hold_expires_at = utcnow() - timedelta(minutes=1)
+    db.session.commit()
+    count = expire_due_holds()
+    assert count >= 1
+    db.session.expire_all()
+    assert db.session.get(VenueBooking, booking_id).status == "expired"
+    queue = client.get("/api/venues/bookings/pending",
+                       headers=context.staff_headers)
+    assert booking_id not in [b["id"] for b in queue.get_json()]
+
+
+def test_hold_ac4_expired_hold_cannot_be_approved(client, context):
+    booking_id = add_booking(context)
+    assert hold_request(client, context, booking_id).status_code == 200
+    saved = db.session.get(VenueBooking, booking_id)
+    saved.hold_expires_at = utcnow() - timedelta(minutes=1)
+    db.session.commit()
+    response = client.post(f"/api/venues/bookings/{booking_id}/approve",
+                           headers=context.staff_headers)
+    assert response.status_code in (400, 409), response.get_json()
+    db.session.expire_all()
+    assert db.session.get(VenueBooking, booking_id).status != "approved"
+
+
+def test_hold_ac5_warning_and_expiry_notices(client, context):
+    booking_id = add_booking(context)
+    assert hold_request(client, context, booking_id,
+                        expiry=hold_expiry(12)).status_code == 200
+    url = "/api/venues/bookings/hold-notices"
+    response = client.get(url, headers=context.coordinator_headers)
+    assert response.status_code == 200
+    assert any(n["bookingId"] == booking_id and n["type"] == "expiring"
+               for n in response.get_json())
+    saved = db.session.get(VenueBooking, booking_id)
+    saved.hold_expires_at = utcnow() - timedelta(minutes=1)
+    db.session.commit()
+    expire_due_holds()
+    response = client.get(url, headers=context.coordinator_headers)
+    assert response.status_code == 200
+    assert any(n["bookingId"] == booking_id and n["type"] == "expired"
+               for n in response.get_json())
+
+
+def test_hold_ac6_extend_active_hold(client, context):
+    booking_id = add_booking(context)
+    assert hold_request(client, context, booking_id).status_code == 200
+    new_expiry = hold_expiry(96)
+    response = hold_request(client, context, booking_id,
+                            action="extend", expiry=new_expiry)
+    assert response.status_code == 200, response.get_json()
+    db.session.expire_all()
+    saved = db.session.get(VenueBooking, booking_id)
+    assert saved.status == "held"
+    assert saved.hold_expires_at == new_expiry
+
+
+def test_hold_ac6_release_active_hold(client, context):
+    booking_id = add_booking(context)
+    assert hold_request(client, context, booking_id).status_code == 200
+    response = hold_request(client, context, booking_id, action="release")
+    assert response.status_code == 200, response.get_json()
+    db.session.expire_all()
+    saved = db.session.get(VenueBooking, booking_id)
+    assert saved.status == "released"
+    assert saved.hold_released_at is not None
+
+
+def test_hold_other_staff_cannot_manage_hold(client, context):
+    booking_id = add_booking(context)
+    response = hold_request(client, context, booking_id,
+                            headers=context.other_headers)
+    assert response.status_code == 403
+    db.session.expire_all()
+    assert db.session.get(VenueBooking, booking_id).status == "pending"
+
+
+def test_hold_coordinator_cannot_place_hold(client, context):
+    booking_id = add_booking(context)
+    response = hold_request(client, context, booking_id,
+                            headers=context.coordinator_headers)
+    assert response.status_code == 403
+
+
+def test_hold_reject_duplicate_place_action(client, context):
+    booking_id = add_booking(context)
+    assert hold_request(client, context, booking_id).status_code == 200
+    response = hold_request(client, context, booking_id)
+    assert response.status_code in (400, 409)

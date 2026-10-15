@@ -11,8 +11,10 @@ from datetime import datetime, timedelta, time
 import re
 
 from app.extensions import db
+from app.common.time import utcnow
 from app.models.venue import (
     BOOKING_APPROVED,
+    BOOKING_HELD,
     Venue,
     VenueAvailabilityFlag,
     VenueBooking,
@@ -99,11 +101,15 @@ def get_calendar(venue_id: int, start, end):
     buffer = timedelta(minutes=(venue.setup_minutes or 0) + (venue.turnaround_minutes or 0))
     bookings = VenueBooking.query.filter(
         VenueBooking.venue_id == venue_id,
-        VenueBooking.status == BOOKING_APPROVED,
+        db.or_(
+            VenueBooking.status == BOOKING_APPROVED,
+            db.and_(VenueBooking.status == BOOKING_HELD, VenueBooking.hold_expires_at > utcnow()),
+        ),
         VenueBooking.start_datetime <= end + buffer,
         VenueBooking.end_datetime >= start - buffer,
     ).order_by(VenueBooking.start_datetime.asc()).all()
     booking_dicts = []
+    held_dicts = []
     for b in bookings:
         window = compute_booking_window(b, venue)
         if not (window[0] <= end and start <= window[1]):
@@ -112,7 +118,10 @@ def get_calendar(venue_id: int, start, end):
         entry["eventName"] = b.event.name if b.event else f"Event #{b.event_id}"
         entry["effectiveStart"] = window[0].isoformat()
         entry["effectiveEnd"] = window[1].isoformat()
-        booking_dicts.append(entry)
+        if b.status == BOOKING_HELD:
+            held_dicts.append(entry)
+        else:
+            booking_dicts.append(entry)
 
     blocks = VenueUnavailability.query.filter(
         VenueUnavailability.venue_id == venue_id,
@@ -121,6 +130,7 @@ def get_calendar(venue_id: int, start, end):
     ).all()
     return {
         "confirmedBookings": booking_dicts,
+        "heldBookings": held_dicts,
         "unavailability": [u.to_dict() for u in blocks],
     }
 

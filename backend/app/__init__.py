@@ -39,4 +39,12 @@ def create_app(config_name="development"):
     from app.common.errors import register_error_handlers
     register_error_handlers(app)
 
+    # Run with `flask process-holds`, scheduled externally every five minutes.
+    # No background thread inside Flask (avoids debug-reloader duplicates).
+    @app.cli.command("process-holds")
+    def process_holds_command():
+        from app.venues.services.booking import expire_due_holds
+        count = expire_due_holds()
+        print(f"Expired {count} tentative hold(s).")
+
     return app

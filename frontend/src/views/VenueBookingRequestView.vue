@@ -173,6 +173,13 @@
         </p>
       </div>
 
+      <!-- Hold notices derived from the coordinator's booking records -->
+      <div v-if="holdNotices.length" class="hold-notices" role="status">
+        <p v-for="notice in holdNotices" :key="notice.bookingId" :class="notice.kind">
+          <strong>{{ notice.title }}</strong> {{ notice.message }}
+        </p>
+      </div>
+
       <!-- Rejection notices derived from rejected bookings -->
       <div v-if="rejectionNotices.length" class="rejection-notices" role="status">
         <div v-for="notice in rejectionNotices" :key="notice.bookingId" class="rejection-notice">
@@ -273,6 +280,39 @@ const resubmittingFromId = ref(null);
 const myBookings = ref([]);
 const confirmationNotices = ref([]);
 const rejectionNotices = ref([]);
+
+// No separate notification service: notices come from the existing booking list.
+const holdNotices = computed(() => {
+  const now = Date.now();
+  return myBookings.value.flatMap((booking) => {
+    const label = booking.venueName || `Venue #${booking.venueId}`;
+    const expiry = parseHoldExpiry(booking.holdExpiresAt ?? booking.hold_expires_at);
+    if (booking.status === "expired") {
+      return [{ bookingId: booking.id, kind: "expired", title: "Hold expired:",
+        message: `Your tentative hold for ${label} has expired. The venue is available to others.` }];
+    }
+    if (booking.status === "held" && expiry && expiry.getTime() > now &&
+        expiry.getTime() - now <= 24 * 60 * 60 * 1000) {
+      return [{ bookingId: booking.id, kind: "warning", title: "Hold expiring soon:",
+        message: `Your tentative hold for ${label} expires on ${formatHoldExpiry(expiry)}.` }];
+    }
+    return [];
+  });
+});
+
+function parseHoldExpiry(value) {
+  if (!value) return null;
+  const text = String(value).trim().replace(" ", "T");
+  const date = new Date(/(?:Z|[+-]\d{2}:?\d{2})$/i.test(text) ? text : `${text}Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function formatHoldExpiry(date) {
+  return date.toLocaleString("en-SG", {
+    timeZone: "Asia/Singapore", day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true,
+  });
+}
 const statusLoading = ref(false);
 const statusError = ref("");
 const bookingToWithdraw = ref(null);
@@ -528,6 +568,9 @@ function formatStatus(status) {
     rejected: "Rejected",
     withdrawn: "Withdrawn",
     cancelled: "Cancelled",
+    held: "Held",
+    expired: "Expired",
+    released: "Released",
   };
   return labels[status] || status || "Unknown";
 }
@@ -557,6 +600,12 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.hold-notices { margin: 0 0 1rem; }
+.hold-notices p { margin: .35rem 0; padding: .8rem 1rem; border-radius: 10px; }
+.hold-notices .warning { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; }
+.hold-notices .expired { background: #f1f5f9; border: 1px solid #cbd5e1; color: #334155; }
+.status-pill.held { background: #fef3c7; color: #92400e; }
+.status-pill.expired, .status-pill.released { background: #e2e8f0; color: #475569; }
 .rejection-notices { margin: 0 0 1rem; padding: .8rem 1rem; border: 1px solid #f3b4c4; border-radius: 10px; background: #fde8ee; color: #a12b47; }
 .rejection-notice + .rejection-notice { border-top: 1px solid #f3b4c4; margin-top: .7rem; padding-top: .7rem; }
 .rejection-notice p { margin: .4rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -663,3 +712,4 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary, #6
 .resubmission-banner + .section { padding-top: 16px; }
 
 </style>
+

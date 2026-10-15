@@ -96,6 +96,7 @@
       <div class="card timeline">
         <div class="legend">
           <span><i class="sw booked" /> Booked event</span>
+          <span><i class="sw held" /> Tentative hold</span>
           <span><i class="sw pad" /> Setup / turnaround</span>
           <span><i class="sw blocked" /> Unavailable</span>
         </div>
@@ -129,7 +130,7 @@
 
       <div class="card list">
         <h3>This week</h3>
-        <p v-if="!items.length" class="empty">Nothing booked or blocked this week.</p>
+        <p v-if="!items.length" class="empty">Nothing booked, held, or blocked this week.</p>
         <table v-else>
           <thead>
             <tr>
@@ -145,8 +146,8 @@
               <td>{{ fmt(it.start) }} to {{ fmt(it.end) }}</td>
               <td>{{ it.venue }}</td>
               <td>
-                <span :class="['badge', it.type === 'booked' ? 'sky' : 'rose']">
-                  {{ it.type === "booked" ? "Booked" : "Unavailable" }}
+                <span :class="['badge', it.type === 'booked' ? 'sky' : it.type === 'held' ? 'butter' : 'rose']">
+                  {{ it.type === "booked" ? "Booked" : it.type === "held" ? "Held" : "Unavailable" }}
                 </span>
               </td>
               <td>{{ it.detail }}</td>
@@ -187,6 +188,20 @@ const naiveIso = (d) => `${dayKey(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes(
 const fmt = (iso) =>
   new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 const fmtTime = (iso) => new Date(iso).toLocaleTimeString([], { timeStyle: "short" });
+// Hold expiry timestamps are stored in UTC; booking start/end times remain local.
+function formatHoldExpiry(value) {
+  if (!value) return "Not specified";
+  const timestamp = String(value).trim().replace(" ", "T");
+  const utcTimestamp = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(timestamp) ? timestamp : `${timestamp}Z`;
+  const date = new Date(utcTimestamp);
+  if (Number.isNaN(date.getTime())) return "Not specified";
+  return date.toLocaleString("en-SG", {
+    timeZone: "Asia/Singapore",
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "numeric", minute: "2-digit", hour12: true,
+  });
+}
+
 
 function mondayOf(date) {
   const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
@@ -198,7 +213,7 @@ function mondayOf(date) {
 const mode = ref("combined");
 const venues = ref([]);
 const selectedVenueId = ref("");
-const rows = ref([]); // [{ venue, confirmedBookings, unavailability }]
+const rows = ref([]); // [{ venue, confirmedBookings, heldBookings, unavailability }]
 const flags = ref([]);
 const loading = ref(false);
 const saving = ref(false);
@@ -281,6 +296,18 @@ const dayRows = computed(() =>
         });
       }
     }
+    for (const b of r.heldBookings || []) {
+      const padded = clip(b.effectiveStart || b.startDatetime, b.effectiveEnd || b.endDatetime);
+      if (padded) segments.push({ kind: "pad", ...padded, title: `Setup/turnaround for held event #${b.eventId}` });
+      const core = clip(b.startDatetime, b.endDatetime);
+      if (core) {
+        segments.push({
+          kind: "held",
+          ...core,
+          title: `${b.eventName || `Event #${b.eventId}`} (Held), ${fmt(b.startDatetime)} to ${fmt(b.endDatetime)}. Expires ${formatHoldExpiry(b.holdExpiresAt)}`,
+        });
+      }
+    }
     for (const u of r.unavailability || []) {
       const seg = clip(u.start, u.end);
       if (seg) segments.push({ kind: "blocked", ...seg, title: `Unavailable: ${u.reason || "no reason given"}` });
@@ -299,6 +326,14 @@ const items = computed(() =>
         start: b.startDatetime,
         end: b.endDatetime,
         detail: `${b.eventName || `Event #${b.eventId}`}. Venue held ${fmt(b.effectiveStart)} to ${fmt(b.effectiveEnd)} including setup and turnaround.`,
+      })),
+      ...(r.heldBookings || []).map((b) => ({
+        key: `h${b.id}`,
+        type: "held",
+        venue: r.venue?.name,
+        start: b.startDatetime,
+        end: b.endDatetime,
+        detail: `${b.eventName || `Event #${b.eventId}`}. Tentative hold expires ${formatHoldExpiry(b.holdExpiresAt)}.`,
       })),
       ...(r.unavailability || []).map((u) => ({
         key: `u${u.id}`,
@@ -492,6 +527,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
 .seg { position: absolute; top: 0; bottom: 0; }
 .seg.pad, .sw.pad { background: var(--butter-bg); border: 1px dashed var(--butter-text); }
 .seg.booked, .sw.booked { background: var(--primary); }
+.seg.held, .sw.held { background: #d9a441; }
 .seg.blocked, .sw.blocked {
   background: repeating-linear-gradient(45deg, var(--rose-text), var(--rose-text) 6px, var(--rose-bg) 6px, var(--rose-bg) 12px);
 }
@@ -501,6 +537,7 @@ input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px s
 .list th { font-size: 0.85rem; color: var(--text-muted); }
 .badge { padding: 0.15rem 0.6rem; border-radius: 999px; font-size: 0.82rem; font-weight: 500; white-space: nowrap; }
 .sky { background: var(--sky-bg); color: var(--sky-text); }
+.butter { background: var(--butter-bg, #fef3c7); color: var(--butter-text, #92400e); }
 .rose { background: var(--rose-bg); color: var(--rose-text); }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
