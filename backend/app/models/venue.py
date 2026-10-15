@@ -205,6 +205,11 @@ class VenueBooking(db.Model):
     start_datetime = db.Column(db.DateTime, nullable=False)
     end_datetime = db.Column(db.DateTime, nullable=False)
 
+    booking_label = db.Column(db.String(255), nullable=True)
+    equipment = db.Column(db.Text, nullable=True)
+    catering = db.Column(db.Text, nullable=True)
+    other_requirements = db.Column(db.Text, nullable=True)
+
     decision_reason = db.Column(db.Text, nullable=True)
     alternative_suggestion = db.Column(db.String(500), nullable=True)
 
@@ -243,6 +248,10 @@ class VenueBooking(db.Model):
                 else None
             ),
             "requestedBy": self.requested_by,
+            "label": self.booking_label,
+            "equipment": self.equipment,
+            "catering": self.catering,
+            "otherRequirements": self.other_requirements,
             "decidedBy": self.decided_by,
             "decisionReason": self.decision_reason,
             "alternativeSuggestion": self.alternative_suggestion,

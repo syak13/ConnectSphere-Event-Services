@@ -142,6 +142,10 @@ def submit_booking_requests(event: Event, venue_requests: list, user_id: int, to
             status=PENDING,
             start_datetime=start_at,
             end_datetime=end_at,
+            booking_label=item.get("label"),
+            equipment=item.get("equipment"),
+            catering=item.get("catering"),
+            other_requirements=item.get("other_requirements"),
         )
         for item, venue, start_at, end_at in valid
     ]

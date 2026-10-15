@@ -14,6 +14,13 @@
     <div v-show="activeTab === 'submit'">
       <div class="card">
         <form @submit.prevent="submitBooking">
+          <div v-if="resubmittingFromId !== null" class="resubmission-banner" role="status">
+            <span class="resubmission-banner-icon" aria-hidden="true">ℹ</span>
+            <span>
+              <strong>Resubmitting rejected booking #{{ resubmittingFromId }}</strong>
+              <span class="resubmission-banner-detail">A new pending request will be created. The rejected booking will remain in your history.</span>
+            </span>
+          </div>
           <div class="section">
             <h3>Event</h3>
             <div class="form-group">
@@ -79,6 +86,26 @@
                 </p>
               </div>
 
+              <h5 class="subheading">Venue-specific requirements (optional)</h5>
+              <div class="form-grid">
+                <div class="form-group">
+                  <label :for="`label-${index}`">Booking Label</label>
+                  <input :id="`label-${index}`" v-model="venueRequest.label" type="text" maxlength="255" placeholder="e.g. Main auditorium" />
+                </div>
+                <div class="form-group">
+                  <label :for="`equipment-${index}`">Equipment</label>
+                  <input :id="`equipment-${index}`" v-model="venueRequest.equipment" type="text" placeholder="e.g. Projector" />
+                </div>
+                <div class="form-group">
+                  <label :for="`catering-${index}`">Catering</label>
+                  <input :id="`catering-${index}`" v-model="venueRequest.catering" type="text" />
+                </div>
+                <div class="form-group">
+                  <label :for="`other-${index}`">Other Requirements</label>
+                  <textarea :id="`other-${index}`" v-model="venueRequest.otherRequirements" rows="2"></textarea>
+                </div>
+              </div>
+
               <h5 class="subheading">Timing</h5>
               <div class="form-grid">
                 <div class="form-group">
@@ -120,7 +147,7 @@
           <div class="actions">
             <button type="button" class="btn secondary" @click="resetForm">Clear</button>
             <button type="submit" class="btn" :disabled="submitting">
-              {{ submitting ? "Submitting..." : "Submit Booking Request" }}
+              {{ submitting ? "Submitting..." : resubmittingFromId !== null ? "Resubmit Booking Request" : "Submit Booking Request" }}
             </button>
           </div>
         </form>
@@ -189,6 +216,11 @@
           <p v-if="booking.status === 'rejected' && booking.alternativeSuggestion" class="rejection-reason">
             <strong>Alternative suggestion:</strong> {{ booking.alternativeSuggestion }}
           </p>
+          <div v-if="booking.status === 'rejected'" class="booking-actions">
+            <button type="button" class="btn" @click="resubmitRejectedBooking(booking)">
+              Resubmit Booking
+            </button>
+          </div>
           <div v-if="booking.status === 'pending'" class="booking-actions">
             <button type="button" class="btn withdraw-btn" :disabled="withdrawingId === booking.id"
               @click="openWithdrawConfirmation(booking)">
@@ -236,6 +268,7 @@ const eventId = ref("");
 const submitting = ref(false);
 const errors = ref([]);
 const successMessage = ref("");
+const resubmittingFromId = ref(null);
 
 const myBookings = ref([]);
 const confirmationNotices = ref([]);
@@ -260,6 +293,10 @@ const emptyVenue = () => ({
   startTime: "",
   endTime: "",
   endDate: "",
+  label: "",
+  equipment: "",
+  catering: "",
+  otherRequirements: "",
 });
 const venueRequests = ref([emptyVenue()]);
 
@@ -286,10 +323,40 @@ function removeVenue(index) {
 }
 
 function resetForm() {
+  resubmittingFromId.value = null;
   eventId.value = "";
   venueRequests.value = [emptyVenue()];
   errors.value = [];
   successMessage.value = "";
+}
+
+function resubmitRejectedBooking(booking) {
+  if (booking.status !== "rejected") return;
+
+  // Keep database wall-clock times unchanged when filling date/time inputs.
+  const start = String(booking.startDatetime || "").replace(" ", "T");
+  const end = String(booking.endDatetime || "").replace(" ", "T");
+  const startDate = start.slice(0, 10);
+  const endDate = end.slice(0, 10);
+
+  eventId.value = Number(booking.eventId);
+  venueRequests.value = [{
+    ...emptyVenue(),
+    venueId: Number(booking.venueId),
+    date: startDate,
+    startTime: start.slice(11, 16),
+    endTime: end.slice(11, 16),
+    endDate: endDate !== startDate ? endDate : "",
+    label: booking.label || "",
+    equipment: booking.equipment || "",
+    catering: booking.catering || "",
+    otherRequirements: booking.otherRequirements || "",
+  }];
+  resubmittingFromId.value = booking.id;
+  errors.value = [];
+  successMessage.value = "";
+  activeTab.value = "submit";
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function fieldError(index, field) {
@@ -327,11 +394,18 @@ async function submitBooking() {
         startTime: venue.startTime,
         endTime: venue.endTime,
         endDate: venue.endDate || null,
+        label: venue.label || null,
+        equipment: venue.equipment || null,
+        catering: venue.catering || null,
+        otherRequirements: venue.otherRequirements || null,
       })),
     };
 
     await venuesApi.submitBooking(payload);
-    successMessage.value = "Venue booking request submitted successfully.";
+    successMessage.value = resubmittingFromId.value !== null
+      ? "Resubmission created as a new pending booking. The original rejection remains on record."
+      : "Venue booking request submitted successfully.";
+    resubmittingFromId.value = null;
     venueRequests.value = [emptyVenue()];
   } catch (error) {
     const data = error.response?.data;
@@ -568,4 +642,24 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary, #6
   .tabs { flex-wrap: wrap; }
   .booking-heading { flex-direction: column; }
 }
+
+/* Resubmission notice: inset to align with the form sections. */
+.resubmission-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin: 20px 20px 0;
+  padding: 14px 16px;
+  background: #f3efff;
+  border: 1px solid #d9ceff;
+  border-left: 4px solid #7057d8;
+  border-radius: 10px;
+  color: #4c3c8c;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.resubmission-banner-icon { font-size: 18px; line-height: 1.3; flex-shrink: 0; }
+.resubmission-banner-detail { display: block; margin-top: 3px; }
+.resubmission-banner + .section { padding-top: 16px; }
+
 </style>
