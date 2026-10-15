@@ -16,7 +16,10 @@ BOOKING_APPROVED = "approved"
 BOOKING_REJECTED = "rejected"
 BOOKING_WITHDRAWN = "withdrawn"
 BOOKING_CANCELLED = "cancelled"
-ACTIVE_BOOKING_STATUSES = (BOOKING_PENDING, BOOKING_APPROVED)
+BOOKING_HELD = "held"
+BOOKING_EXPIRED = "expired"
+BOOKING_RELEASED = "released"
+ACTIVE_BOOKING_STATUSES = (BOOKING_PENDING, BOOKING_APPROVED, BOOKING_HELD)
 
 class Venue(db.Model):
     __tablename__ = "venues"
@@ -210,6 +213,11 @@ class VenueBooking(db.Model):
     catering = db.Column(db.Text, nullable=True)
     other_requirements = db.Column(db.Text, nullable=True)
 
+    hold_expires_at = db.Column(db.DateTime, nullable=True)
+    hold_warning_sent_at = db.Column(db.DateTime, nullable=True)
+    hold_expired_notified_at = db.Column(db.DateTime, nullable=True)
+    hold_released_at = db.Column(db.DateTime, nullable=True)
+
     decision_reason = db.Column(db.Text, nullable=True)
     alternative_suggestion = db.Column(db.String(500), nullable=True)
 
@@ -236,7 +244,9 @@ class VenueBooking(db.Model):
             "id": self.id,
             "eventId": self.event_id,
             "venueId": self.venue_id,
-            "status": self.status,
+            "status": ("expired" if self.status == "held" and self.hold_expires_at and self.hold_expires_at <= utcnow() else self.status),
+            "holdExpiresAt": self.hold_expires_at.isoformat() if self.hold_expires_at else None,
+            "holdReleasedAt": self.hold_released_at.isoformat() if self.hold_released_at else None,
             "startDatetime": (
                 self.start_datetime.isoformat()
                 if self.start_datetime
