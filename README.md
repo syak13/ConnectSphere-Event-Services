@@ -99,6 +99,13 @@ pip install pytest
 pytest
 ```
 
+### Continuous integration
+
+`.github/workflows/tests.yml` runs the backend test suite on GitHub Actions
+for every push to `main` and every pull request into `main`. The job is named
+`test`; mark it as a required status check in the `main` branch protection
+rule so a pull request that breaks a test cannot be merged.
+
 ## 3. Frontend setup (Vue)
 
 ```bash
