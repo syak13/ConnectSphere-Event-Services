@@ -450,6 +450,8 @@ def cancel_booking(booking_id):
     data = request.get_json() or {}
     try:
         result = booking.cancel_booking(record, user.id, data.get("reason"))
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(result.to_dict()), 200
@@ -573,6 +575,30 @@ def list_pending_bookings():
 
     return jsonify(results), 200
 
+@venues_bp.get("/bookings/approved")
+@roles_required("venue_staff")
+def get_approved_bookings():
+    user = _current_user()
+
+    approved_bookings = (
+        db.session.query(VenueBooking)
+        .join(Venue, VenueBooking.venue_id == Venue.id)
+        .filter(
+            VenueBooking.status == "approved",
+            Venue.created_by == user.id,
+        )
+        .order_by(VenueBooking.start_datetime.asc())
+        .all()
+    )
+
+    return jsonify([
+        {
+            **booking.to_dict(),
+            "venueName": booking.venue.name,
+            "eventName": booking.event.name if booking.event else None,
+        }
+        for booking in approved_bookings
+    ]), 200
 
 @venues_bp.post("/bookings/<int:booking_id>/approve")
 @roles_required("venue_staff")

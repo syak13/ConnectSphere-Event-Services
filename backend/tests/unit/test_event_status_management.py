@@ -773,7 +773,7 @@ def test_cancelling_approved_venue_reverts_confirmed_event_to_planning(
     with app.app_context():
         event_id = make_event(organiser, status="confirmed", capacity_needed=100)
         event = db.session.get(Event, event_id)
-        booking = _create_venue_booking(event, organiser, status="approved")
+        booking = _create_venue_booking(event, organiser, status="approved", venue_owner_id=coordinator)
 
         venue_booking.cancel_booking(booking, decided_by=coordinator, reason="Venue unavailable")
 
@@ -792,7 +792,7 @@ def test_pending_venue_booking_cannot_be_cancelled(app, organiser, coordinator, 
     with app.app_context():
         event_id = make_event(organiser, status="planning", capacity_needed=100)
         event = db.session.get(Event, event_id)
-        booking = _create_venue_booking(event, organiser, status="pending")
+        booking = _create_venue_booking(event, organiser, status="pending", venue_owner_id=coordinator)
 
         with pytest.raises(ValueError, match="Only approved bookings"):
             venue_booking.cancel_booking(
@@ -814,7 +814,7 @@ def test_venue_staff_can_cancel_booking_through_api(
 
     with client.application.app_context():
         event = db.session.get(Event, event_id)
-        booking = _create_venue_booking(event, organiser, status="approved")
+        booking = _create_venue_booking(event, organiser, status="approved", venue_owner_id=venue_staff_id)
         booking_id = booking.id
 
     response = client.post(

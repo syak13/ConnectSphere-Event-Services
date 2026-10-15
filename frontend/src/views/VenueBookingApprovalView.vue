@@ -7,15 +7,24 @@
         type="button"
         class="btn-primary"
         :disabled="loading"
-        @click="loadPendingBookings"
+        @click="refreshBookings"
       >
         {{ loading ? "Refreshing..." : "Refresh requests" }}
       </button>
     </div>
 
     <p class="intro">
-      Pending requests for venues you manage, sorted by the soonest event date.
+      Review pending requests and manage approved bookings for venues you own.
     </p>
+
+    <div class="booking-tabs" role="tablist" aria-label="Booking status">
+      <button type="button" role="tab" :aria-selected="activeTab === 'pending'"
+        :class="['booking-tab', { active: activeTab === 'pending' }]"
+        @click="switchBookingTab('pending')">Pending Requests</button>
+      <button type="button" role="tab" :aria-selected="activeTab === 'approved'"
+        :class="['booking-tab', { active: activeTab === 'approved' }]"
+        @click="switchBookingTab('approved')">Approved Bookings</button>
+    </div>
 
     <p v-if="error" class="field-error" role="alert">
       {{ error }}
@@ -26,25 +35,25 @@
     </p>
 
     <p v-if="loading" class="empty" role="status">
-      Loading booking requests...
+      Loading {{ activeTab }} bookings...
     </p>
 
-    <p v-else-if="!error && !bookings.length" class="empty">
-      No pending booking requests for your venues.
+    <p v-else-if="!error && !displayedBookings.length" class="empty">
+      {{ activeTab === "pending" ? "No pending booking requests for your venues." : "No approved bookings for your venues." }}
     </p>
 
     <template v-else-if="!error && !loading">
       <div class="card summary">
-        <span class="summary-label">Pending booking requests</span>
+        <span class="summary-label">{{ activeTab === "pending" ? "Pending booking requests" : "Approved bookings" }}</span>
         <span class="badge cap">
-          {{ bookings.length }}
-          {{ bookings.length === 1 ? "request" : "requests" }}
+          {{ displayedBookings.length }}
+          {{ displayedBookings.length === 1 ? "request" : "requests" }}
         </span>
       </div>
 
       <div class="grid" aria-live="polite">
         <article
-          v-for="booking in bookings"
+          v-for="booking in displayedBookings"
           :key="booking.id"
           class="card booking"
         >
@@ -52,7 +61,7 @@
             <h3>
               {{ booking.eventName || `Event #${booking.eventId}` }}
             </h3>
-            <span class="badge cap">Pending</span>
+            <span class="badge cap">{{ activeTab === "pending" ? "Pending" : "Approved" }}</span>
           </header>
 
           <p class="meta">Request #{{ booking.id }}</p>
@@ -92,7 +101,7 @@
             {{ booking.eventDescription }}
           </p>
 
-          <div class="booking-decision-actions">
+          <div v-if="activeTab === 'pending'" class="booking-decision-actions">
           <button
             type="button"
             class="btn-ghost approve-btn"
@@ -107,9 +116,49 @@
             {{ rejectingId === booking.id ? "Rejecting..." : "Reject booking" }}
           </button>
           </div>
+          <div v-if="activeTab === 'approved'" class="booking-decision-actions">
+            <button type="button" class="btn-danger reject-btn"
+              :disabled="cancellingId !== null" @click="openCancellationConfirmation(booking)">
+              {{ cancellingId === booking.id ? "Cancelling..." : "Cancel booking" }}
+            </button>
+          </div>
         </article>
       </div>
     </template>
+
+    <!-- Cancellation confirmation for an already approved booking -->
+    <div v-if="bookingToCancel" class="modal-backdrop" @click.self="closeCancellation">
+      <div class="confirmation-dialog rejection-dialog" role="dialog" aria-modal="true"
+        aria-labelledby="cancel-dialog-title">
+        <h3 id="cancel-dialog-title">Cancel approved booking?</h3>
+        <p>This will cancel the approved booking for
+          <strong>{{ bookingToCancel.eventName || `Event #${bookingToCancel.eventId}` }}</strong>
+          at <strong>{{ bookingToCancel.venueName || `Venue #${bookingToCancel.venueId}` }}</strong>.
+          The Event Coordinator will see the cancelled status.</p>
+        <p class="dialog-time">
+          <strong>Start:</strong> {{ formatDate(bookingToCancel.startDatetime) }} {{ formatTime(bookingToCancel.startDatetime) }}
+          <br />
+          <strong>End:</strong> {{ formatDate(bookingToCancel.endDatetime) }} {{ formatTime(bookingToCancel.endDatetime) }}
+        </p>
+        <label class="rejection-label" for="cancellation-reason">Cancellation reason (optional)</label>
+        <textarea id="cancellation-reason" v-model="cancellationReason" rows="3"
+          placeholder="e.g. Venue unavailable due to urgent maintenance"
+          :aria-invalid="cancellationReason.length > REJECTION_LIMIT" />
+        <p class="character-count" :class="{ 'over-limit': cancellationReason.length > REJECTION_LIMIT }">
+          {{ cancellationReason.length }}/{{ REJECTION_LIMIT }} characters
+        </p>
+        <p v-if="cancellationError" class="field-error" role="alert">{{ cancellationError }}</p>
+        <div class="confirmation-actions">
+          <button type="button" class="btn-primary secondary" :disabled="cancellingId !== null"
+            @click="closeCancellation">Keep booking</button>
+          <button type="button" class="btn-danger reject-btn"
+            :disabled="cancellingId !== null || cancellationReason.length > REJECTION_LIMIT"
+            @click="confirmCancellation">
+            {{ cancellingId !== null ? "Cancelling..." : "Yes, Cancel Booking" }}
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- Rejection confirmation pop-up -->
     <div v-if="bookingToReject" class="modal-backdrop" @click.self="cancelRejection">
@@ -228,6 +277,13 @@ import { computed, onMounted, ref } from "vue";
 import venuesApi from "../api/venues";
 
 const bookings = ref([]);
+const approvedBookings = ref([]);
+const activeTab = ref("pending");
+const displayedBookings = computed(() => activeTab.value === "pending" ? bookings.value : approvedBookings.value);
+const bookingToCancel = ref(null);
+const cancellingId = ref(null);
+const cancellationReason = ref("");
+const cancellationError = ref("");
 const loading = ref(false);
 const error = ref("");
 const notice = ref("");
@@ -293,6 +349,74 @@ async function loadPendingBookings() {
       "Could not load pending booking requests.";
   } finally {
     loading.value = false;
+  }
+}
+
+async function loadApprovedBookings() {
+  loading.value = true;
+  error.value = "";
+  approvedBookings.value = [];
+  try {
+    const { data } = await venuesApi.getApprovedBookings();
+    if (!Array.isArray(data)) throw new Error("Unexpected response format");
+    approvedBookings.value = data.filter((b) => b.status === "approved")
+      .sort((a, b) => String(a.startDatetime || "").localeCompare(String(b.startDatetime || "")));
+  } catch (err) {
+    error.value = err.response?.data?.error || "Could not load approved bookings.";
+  } finally {
+    loading.value = false;
+  }
+}
+
+function refreshBookings() {
+  return activeTab.value === "pending" ? loadPendingBookings() : loadApprovedBookings();
+}
+
+function switchBookingTab(tab) {
+  if (cancellingId.value !== null || approvingId.value !== null || rejectingId.value !== null) return;
+  activeTab.value = tab;
+  notice.value = "";
+  error.value = "";
+  refreshBookings();
+}
+
+function openCancellationConfirmation(booking) {
+  if (booking.status !== "approved" || cancellingId.value !== null) return;
+  bookingToCancel.value = booking;
+  cancellationReason.value = "";
+  cancellationError.value = "";
+  notice.value = "";
+}
+
+function closeCancellation() {
+  if (cancellingId.value !== null) return;
+  bookingToCancel.value = null;
+  cancellationError.value = "";
+}
+
+async function confirmCancellation() {
+  const current = bookingToCancel.value;
+  if (!current || cancellingId.value !== null || cancellationReason.value.length > REJECTION_LIMIT) return;
+  cancellingId.value = current.id;
+  cancellationError.value = "";
+  error.value = "";
+  notice.value = "";
+  try {
+    await venuesApi.cancelBooking(current.id, { reason: cancellationReason.value.trim() });
+    bookingToCancel.value = null;
+    await loadApprovedBookings();
+    notice.value = "Booking cancelled successfully. The Event Coordinator can view its updated status.";
+  } catch (err) {
+    const message = err.response?.data?.error || "Unable to cancel this booking.";
+    if ([400, 403, 409].includes(err.response?.status)) {
+      bookingToCancel.value = null;
+      await loadApprovedBookings();
+      error.value = message;
+    } else {
+      cancellationError.value = message;
+    }
+  } finally {
+    cancellingId.value = null;
   }
 }
 
@@ -398,6 +522,10 @@ onMounted(loadPendingBookings);
 </script>
 
 <style scoped>
+.booking-tabs { display: flex; gap: .5rem; margin-bottom: 1.25rem; border-bottom: 1px solid var(--border, #e4defa); }
+.booking-tab { padding: .8rem 1rem; border: none; border-bottom: 3px solid transparent; background: transparent; color: var(--text-muted, #6b6890); font: inherit; font-weight: 600; cursor: pointer; }
+.booking-tab.active { color: var(--lilac-text, #4b3fa0); border-bottom-color: var(--primary, #6d5bd0); }
+
 .head {
   display: flex;
   align-items: center;

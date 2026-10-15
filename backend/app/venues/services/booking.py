@@ -144,6 +144,9 @@ def cancel_booking(
         if venue is None:
             raise ValueError("Venue not found")
 
+        if venue.created_by != decided_by:
+            raise PermissionError("You cannot cancel bookings for another staff member's venue")
+
         current = (
             db.session.query(VenueBooking)
             .populate_existing()
