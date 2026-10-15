@@ -302,8 +302,12 @@ CREATE TABLE venue_bookings (
     venue_id            BIGINT UNSIGNED NOT NULL,
     requested_by        BIGINT UNSIGNED NOT NULL,       -- Event Coordinator
     status              ENUM('pending','approved','rejected','withdrawn','cancelled') NOT NULL DEFAULT 'pending',
-   start_datetime        DATETIME NOT NULL,
+    start_datetime        DATETIME NOT NULL,
     end_datetime          DATETIME NOT NULL,
+    booking_label       VARCHAR(255) NULL,
+    equipment           TEXT NULL,
+    catering            TEXT NULL,
+    other_requirements  TEXT NULL,
     decision_reason       TEXT NULL,    
     alternative_suggestion TEXT NULL,
     decided_by            BIGINT UNSIGNED NULL,

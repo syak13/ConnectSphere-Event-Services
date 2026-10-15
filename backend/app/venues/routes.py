@@ -367,6 +367,21 @@ def _parse_venue_request(raw, index):
                 "field": field,
                 "message": f"Venue {index}: {label} is not a valid value",
             })
+    for json_key, field in (
+        ("label", "label"),
+        ("equipment", "equipment"),
+        ("catering", "catering"),
+        ("otherRequirements", "other_requirements"),
+    ):
+        value = raw.get(json_key)
+        if value is not None and not isinstance(value, str):
+            errors.append({
+                "venue_id": raw.get("venueId"),
+                "venue": f"Venue {index}",
+                "field": field,
+                "message": f"Venue {index}: {json_key} must be text",
+            })
+        parsed[field] = value.strip() or None if isinstance(value, str) else None
     return parsed, errors
 
 @venues_bp.post("/bookings")
@@ -422,8 +437,23 @@ def list_event_bookings(event_id):
     event = Event.query.get(event_id)
     if not event:
         return jsonify({"error": "Event not found"}), 404
-    bookings = VenueBooking.query.filter_by(event_id=event_id).order_by(VenueBooking.created_at.asc()).all()
-    return jsonify([b.to_dict() for b in bookings]), 200
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+
+    if user.has_role("event_coordinator") and event.coordinator_id == user.id:
+        bookings = VenueBooking.query.filter_by(event_id=event_id)
+    elif user.has_role("venue_staff"):
+        bookings = (
+            VenueBooking.query.join(Venue, VenueBooking.venue_id == Venue.id)
+            .filter(VenueBooking.event_id == event_id, Venue.created_by == user.id)
+        )
+    else:
+        return jsonify({"error": "Forbidden"}), 403
+
+    return jsonify([
+        b.to_dict() for b in bookings.order_by(VenueBooking.created_at.asc(), VenueBooking.id.asc()).all()
+    ]), 200
 
 
 @venues_bp.post("/bookings/<int:booking_id>/withdraw")
@@ -490,6 +520,10 @@ def get_my_booking_requests():
             ),
             "decisionReason": booking.decision_reason,
             "alternativeSuggestion": booking.alternative_suggestion,
+            "label": booking.booking_label,
+            "equipment": booking.equipment,
+            "catering": booking.catering,
+            "otherRequirements": booking.other_requirements,
         })
 
     return jsonify(results), 200
