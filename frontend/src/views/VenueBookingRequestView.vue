@@ -179,6 +179,10 @@
             <p><strong>End:</strong> {{ formatBookingDate(booking.endDatetime) }}</p>
             <p><strong>Submitted:</strong> {{ formatBookingDate(booking.createdAt) }}</p>
           </div>
+          <p v-if="booking.status === 'cancelled'" class="cancellation-reason">
+            <strong>Booking cancelled.</strong> This venue is no longer confirmed for your event.
+            <span v-if="booking.decisionReason"><br /><strong>Reason:</strong> {{ booking.decisionReason }}</span>
+          </p>
           <p v-if="booking.status === 'rejected' && booking.decisionReason" class="rejection-reason">
             <strong>Reason for rejection:</strong> {{ booking.decisionReason }}
           </p>
@@ -449,6 +453,7 @@ function formatStatus(status) {
     approved: "Approved",
     rejected: "Rejected",
     withdrawn: "Withdrawn",
+    cancelled: "Cancelled",
   };
   return labels[status] || status || "Unknown";
 }
@@ -543,6 +548,8 @@ input:focus, select:focus, textarea:focus { outline: 2px solid var(--primary, #6
 .status-pill.pending { background: #fef3c7; color: #92400e; }
 .status-pill.approved { background: #d3f5e3; color: #1e6b47; }
 .status-pill.rejected { background: #fde8ee; color: #a12b47; }
+.status-pill.cancelled { background: #fde8ee; color: #a12b47; }
+.cancellation-reason { margin: 1rem 0 0; padding: .75rem; border-radius: 8px; background: #fde8ee; color: #a12b47; font-size: .875rem; }
 .status-pill.withdrawn { background: #e9e5fb; color: #4b3fa0; }
 .booking-actions { display: flex; justify-content: flex-end; margin-top: 1rem; }
 .withdraw-btn { background: #a12b47; }
