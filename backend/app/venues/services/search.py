@@ -3,8 +3,10 @@ from datetime import datetime, timedelta
 
 from sqlalchemy import and_, func, or_  # `and_` is only used by Story 3
 
+from app.common.time import utcnow
 from app.models.venue import (
     BOOKING_APPROVED,
+    BOOKING_HELD,
     Venue,
     VenueAccessibilityFeature,
     VenueBooking,
@@ -32,13 +34,16 @@ def _is_available(venue: Venue, start: datetime, end: datetime) -> bool:
         minutes=(venue.setup_minutes or 0) + (venue.turnaround_minutes or 0)
     )
 
-    approved = VenueBooking.query.filter(
+    blocking = VenueBooking.query.filter(
         VenueBooking.venue_id == venue.id,
-        VenueBooking.status == BOOKING_APPROVED,
+        or_(
+            VenueBooking.status == BOOKING_APPROVED,
+            and_(VenueBooking.status == BOOKING_HELD, VenueBooking.hold_expires_at > utcnow()),
+        ),
         VenueBooking.start_datetime < requested_end + prefilter_buffer,
         VenueBooking.end_datetime > requested_start - prefilter_buffer,
     ).all()
-    for booking in approved:
+    for booking in blocking:
         busy_start, busy_end = compute_booking_window(booking, venue)
         if busy_start < requested_end and requested_start < busy_end:
             return False

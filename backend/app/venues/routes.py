@@ -1,5 +1,5 @@
 import re
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 
 from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
@@ -367,6 +367,21 @@ def _parse_venue_request(raw, index):
                 "field": field,
                 "message": f"Venue {index}: {label} is not a valid value",
             })
+    for json_key, field in (
+        ("label", "label"),
+        ("equipment", "equipment"),
+        ("catering", "catering"),
+        ("otherRequirements", "other_requirements"),
+    ):
+        value = raw.get(json_key)
+        if value is not None and not isinstance(value, str):
+            errors.append({
+                "venue_id": raw.get("venueId"),
+                "venue": f"Venue {index}",
+                "field": field,
+                "message": f"Venue {index}: {json_key} must be text",
+            })
+        parsed[field] = value.strip() or None if isinstance(value, str) else None
     return parsed, errors
 
 @venues_bp.post("/bookings")
@@ -422,8 +437,23 @@ def list_event_bookings(event_id):
     event = Event.query.get(event_id)
     if not event:
         return jsonify({"error": "Event not found"}), 404
-    bookings = VenueBooking.query.filter_by(event_id=event_id).order_by(VenueBooking.created_at.asc()).all()
-    return jsonify([b.to_dict() for b in bookings]), 200
+    user = _current_user()
+    if user is None:
+        return jsonify({"error": "User not found"}), 404
+
+    if user.has_role("event_coordinator") and event.coordinator_id == user.id:
+        bookings = VenueBooking.query.filter_by(event_id=event_id)
+    elif user.has_role("venue_staff"):
+        bookings = (
+            VenueBooking.query.join(Venue, VenueBooking.venue_id == Venue.id)
+            .filter(VenueBooking.event_id == event_id, Venue.created_by == user.id)
+        )
+    else:
+        return jsonify({"error": "Forbidden"}), 403
+
+    return jsonify([
+        b.to_dict() for b in bookings.order_by(VenueBooking.created_at.asc(), VenueBooking.id.asc()).all()
+    ]), 200
 
 
 @venues_bp.post("/bookings/<int:booking_id>/withdraw")
@@ -450,6 +480,8 @@ def cancel_booking(booking_id):
     data = request.get_json() or {}
     try:
         result = booking.cancel_booking(record, user.id, data.get("reason"))
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     return jsonify(result.to_dict()), 200
@@ -479,7 +511,8 @@ def get_my_booking_requests():
             "eventName": event.name if event else None,
             "venueId": booking.venue_id,
             "venueName": venue.name if venue else None,
-            "status": booking.status,
+            "status": booking.to_dict()["status"],
+            "holdExpiresAt": booking.hold_expires_at.isoformat() if booking.hold_expires_at else None,
             "startDatetime": booking.start_datetime.isoformat(),
             "endDatetime": booking.end_datetime.isoformat(),
             "createdAt": (
@@ -488,6 +521,10 @@ def get_my_booking_requests():
             ),
             "decisionReason": booking.decision_reason,
             "alternativeSuggestion": booking.alternative_suggestion,
+            "label": booking.booking_label,
+            "equipment": booking.equipment,
+            "catering": booking.catering,
+            "otherRequirements": booking.other_requirements,
         })
 
     return jsonify(results), 200
@@ -541,7 +578,7 @@ def list_pending_bookings():
         VenueBooking.query
         .join(Venue, VenueBooking.venue_id == Venue.id)
         .filter(
-            VenueBooking.status == "pending",
+            VenueBooking.status.in_(("pending", "held")),
             Venue.created_by == user.id,
         )
         .order_by(
@@ -573,6 +610,30 @@ def list_pending_bookings():
 
     return jsonify(results), 200
 
+@venues_bp.get("/bookings/approved")
+@roles_required("venue_staff")
+def get_approved_bookings():
+    user = _current_user()
+
+    approved_bookings = (
+        db.session.query(VenueBooking)
+        .join(Venue, VenueBooking.venue_id == Venue.id)
+        .filter(
+            VenueBooking.status == "approved",
+            Venue.created_by == user.id,
+        )
+        .order_by(VenueBooking.start_datetime.asc())
+        .all()
+    )
+
+    return jsonify([
+        {
+            **booking.to_dict(),
+            "venueName": booking.venue.name,
+            "eventName": booking.event.name if booking.event else None,
+        }
+        for booking in approved_bookings
+    ]), 200
 
 @venues_bp.post("/bookings/<int:booking_id>/approve")
 @roles_required("venue_staff")
@@ -616,3 +677,69 @@ def reject_booking(booking_id):
         status = 409 if "already been decided" in message else 400
         return jsonify({"error": message}), status
     return jsonify(result.to_dict()), 200
+
+
+@venues_bp.post("/bookings/<int:booking_id>/hold")
+@roles_required("venue_staff")
+def place_booking_hold(booking_id):
+    return _manage_booking_hold(booking_id, "place")
+
+@venues_bp.post("/bookings/<int:booking_id>/hold/extend")
+@roles_required("venue_staff")
+def extend_booking_hold(booking_id):
+    return _manage_booking_hold(booking_id, "extend")
+
+@venues_bp.post("/bookings/<int:booking_id>/hold/release")
+@roles_required("venue_staff")
+def release_booking_hold(booking_id):
+    return _manage_booking_hold(booking_id, "release")
+
+def _manage_booking_hold(booking_id, action):
+    data = request.get_json(silent=True) or {}
+    expiry = None
+    if action != "release":
+        try:
+            raw = data.get("expiresAt")
+            if not isinstance(raw, str):
+                raise ValueError()
+            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                raise ValueError("Expiry must include a timezone offset")
+            expiry = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        except (TypeError, ValueError):
+            return jsonify({"error": "expiresAt must be an ISO datetime with a timezone offset"}), 400
+    try:
+        result = booking.manage_hold(booking_id, _current_user().id, action, expiry)
+    except LookupError as exc:
+        return jsonify({"error": str(exc)}), 404
+    except PermissionError as exc:
+        return jsonify({"error": str(exc)}), 403
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409 if "conflict" in str(exc).lower() else 400
+    return jsonify(result.to_dict()), 200
+
+@venues_bp.get("/bookings/hold-notices")
+@roles_required("event_coordinator")
+def hold_notices():
+    """In-app notifications on request; a background worker is needed for push alerts."""
+    from datetime import timedelta
+    from app.common.time import utcnow
+    now = utcnow()
+    records = VenueBooking.query.filter(
+        VenueBooking.requested_by == _current_user().id,
+        VenueBooking.hold_expires_at.isnot(None),
+        VenueBooking.status.in_(("held", "expired")),
+    ).all()
+    notices = []
+    for b in records:
+        if b.hold_expires_at <= now:
+            kind = "expired"
+            message = "Your tentative venue hold has expired."
+        elif b.hold_expires_at <= now + timedelta(hours=24):
+            kind = "expiring"
+            message = "Your tentative venue hold expires within 24 hours."
+        else:
+            continue
+        notices.append({"bookingId": b.id, "eventId": b.event_id, "type": kind,
+                        "message": message, "expiresAt": b.hold_expires_at.isoformat()})
+    return jsonify(notices), 200

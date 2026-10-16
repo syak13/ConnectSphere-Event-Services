@@ -112,4 +112,13 @@ export default {
     apiClient.get(
       "/venues/bookings/rejection-notices"
     ),
+
+  getApprovedBookings: () =>
+    apiClient.get("/venues/bookings/approved"),
+
+  cancelBooking: (bookingId, payload = {}) =>
+    apiClient.post(
+      `/venues/bookings/${bookingId}/cancel`,
+      payload
+    ),
 };

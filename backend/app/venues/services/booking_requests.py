@@ -88,7 +88,8 @@ def _has_active_booking(event_id, venue_id):
         VenueBooking.query.filter(
             VenueBooking.event_id == event_id,
             VenueBooking.venue_id == venue_id,
-            VenueBooking.status.in_(ACTIVE_STATUSES),
+            db.or_(VenueBooking.status.in_(("pending", "approved")),
+                    db.and_(VenueBooking.status == "held", VenueBooking.hold_expires_at > utcnow())),
         ).first()
         is not None
     )
@@ -142,6 +143,10 @@ def submit_booking_requests(event: Event, venue_requests: list, user_id: int, to
             status=PENDING,
             start_datetime=start_at,
             end_datetime=end_at,
+            booking_label=item.get("label"),
+            equipment=item.get("equipment"),
+            catering=item.get("catering"),
+            other_requirements=item.get("other_requirements"),
         )
         for item, venue, start_at, end_at in valid
     ]

@@ -11,7 +11,17 @@ def create_app(config_name="development"):
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
-    cors.init_app(app, resources={r"/api/*": {"origins": "*"}}, supports_credentials=True)
+    cors.init_app(
+    app,
+    resources={
+        r"/api/*": {
+            "origins": ["http://localhost:5173"],
+            "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+            "allow_headers": ["Content-Type", "Authorization"],
+        }
+    },
+    supports_credentials=False,
+)
 
     # Import models so Flask-Migrate can detect them
     from app.models import user, event, venue, equipment, change_request
@@ -30,5 +40,13 @@ def create_app(config_name="development"):
 
     from app.common.errors import register_error_handlers
     register_error_handlers(app)
+
+    # Run with `flask process-holds`, scheduled externally every five minutes.
+    # No background thread inside Flask (avoids debug-reloader duplicates).
+    @app.cli.command("process-holds")
+    def process_holds_command():
+        from app.venues.services.booking import expire_due_holds
+        count = expire_due_holds()
+        print(f"Expired {count} tentative hold(s).")
 
     return app
