@@ -412,6 +412,7 @@ CREATE TABLE change_requests (
     organiser_id        BIGINT UNSIGNED NOT NULL,
     requested_changes   JSON NOT NULL,               -- field-level proposed changes
     is_significant      TINYINT(1) NOT NULL DEFAULT 0,
+    reason              TEXT NOT NULL,  
     status              ENUM('pending','processed','rejected','cannot_accommodate') NOT NULL DEFAULT 'pending',
     coordinator_id      BIGINT UNSIGNED NULL,
     decision_reason     TEXT NULL,
