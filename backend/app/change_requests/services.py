@@ -244,3 +244,56 @@ def list_change_requests_for_coordinator(coordinator_id: int):
         .order_by(ChangeRequest.created_at.asc(), ChangeRequest.id.asc())
         .all()
     )
+
+
+WITHDRAWABLE_STATUSES = ("submitted", "under_review", "approved", "planning", "confirmed")
+WITHDRAWAL_STATUS_MESSAGE = (
+    "Withdrawal can only be requested for an event that is submitted, under review, "
+    "approved, planning or confirmed"
+)
+
+
+def _has_pending_withdrawal(event: Event) -> bool:
+    return (
+        ChangeRequest.query.filter_by(event_id=event.id, request_type="withdrawal", status="pending").first()
+        is not None
+    )
+
+
+def can_request_withdrawal(event: Event, user_id: int) -> bool:
+    """Offered to the owner while the event is withdrawable and no withdrawal is already pending."""
+    return (
+        event.organiser_id == user_id
+        and event.status in WITHDRAWABLE_STATUSES
+        and not _has_pending_withdrawal(event)
+    )
+
+
+def request_withdrawal(event: Event, organiser_id: int, reason: str) -> ChangeRequest:
+    if event.organiser_id != organiser_id:
+        raise PermissionError("Only the organiser of this event can request its withdrawal")
+    if event.status not in WITHDRAWABLE_STATUSES:
+        raise ChangeRequestError({"event": WITHDRAWAL_STATUS_MESSAGE})
+
+    errors = {}
+    try:
+        validate_descriptive_text(reason if isinstance(reason, str) else "", "reason")
+    except ValueError as problem:
+        errors["reason"] = str(problem)
+    if _has_pending_withdrawal(event):
+        errors["request"] = "A withdrawal request is already pending for this event"
+    if errors:
+        raise ChangeRequestError(errors)  # nothing has been added to the session
+
+    withdrawal = ChangeRequest(
+        event_id=event.id,
+        organiser_id=organiser_id,
+        request_type="withdrawal",
+        requested_changes={},
+        reason=reason.strip(),
+        is_significant=False,  # not a field change; the Coordinator handles it through the cancel flow
+        status="pending",
+    )
+    db.session.add(withdrawal)
+    db.session.commit()
+    return withdrawal

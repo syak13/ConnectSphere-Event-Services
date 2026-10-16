@@ -9,6 +9,8 @@ from app.change_requests.services import (
     list_change_requests_for_event,
     submit_change_request,
     current_venue_id,
+    can_request_withdrawal,
+    request_withdrawal,
 
 )
 from app.models.event import Event
@@ -43,6 +45,7 @@ def organiser_view(event_id):
         "canRequestChange": can_request_change(event, user.id),
         "currentVenueId": current_venue_id(event),
         "requests": [r.to_dict() for r in list_change_requests_for_event(event, user.id)],
+        "canRequestWithdrawal": can_request_withdrawal(event, user.id),
     }), 200
 
 
@@ -62,6 +65,21 @@ def submit(event_id):
         return jsonify({"error": str(e)}), 403
     return jsonify(created.to_dict()), 201
 
+@change_requests_bp.post("/events/<int:event_id>/withdrawal")
+@roles_required("event_organiser")
+def request_event_withdrawal(event_id):
+    user = _current_user()
+    event = _own_event(event_id, user)
+    if not event:
+        return jsonify({"error": "Event not found"}), 404
+    data = request.get_json() or {}
+    try:
+        created = request_withdrawal(event, user.id, data.get("reason"))
+    except ChangeRequestError as e:
+        return jsonify({"error": "Withdrawal request could not be submitted", "errors": e.errors}), 400
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
+    return jsonify(created.to_dict()), 201
 
 @change_requests_bp.get("/assigned")
 @roles_required("event_coordinator")

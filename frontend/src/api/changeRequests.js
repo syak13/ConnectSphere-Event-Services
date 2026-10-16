@@ -5,4 +5,5 @@ export default {
   submit: (eventId, payload) => apiClient.post(`/change-requests/events/${eventId}`, payload),
   listAssigned: () => apiClient.get("/change-requests/assigned"),
   getCatalogue: () => apiClient.get("/change-requests/catalogue"),
+  requestWithdrawal: (eventId, payload) => apiClient.post(`/change-requests/events/${eventId}/withdrawal`, payload),
 };

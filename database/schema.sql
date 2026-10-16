@@ -410,6 +410,7 @@ CREATE TABLE change_requests (
     id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
     event_id            BIGINT UNSIGNED NOT NULL,
     organiser_id        BIGINT UNSIGNED NOT NULL,
+    request_type        ENUM('change','withdrawal') NOT NULL DEFAULT 'change',
     requested_changes   JSON NOT NULL,               -- field-level proposed changes
     is_significant      TINYINT(1) NOT NULL DEFAULT 0,
     reason              TEXT NOT NULL,  

@@ -125,18 +125,19 @@
     </div>
 
     <div v-if="changeRequests.length" class="card history">
-      <h3 class="section-title">Change Requests</h3>
+      <h3 class="section-title">Change and Withdrawal Requests</h3>
       <ul class="thread-list">
         <li v-for="request in changeRequests" :key="request.id" class="thread-item">
           <div class="change-header">
             <span class="badge" :class="request.status">{{ statusLabel(request.status) }}</span>
-            <span class="badge" :class="request.isSignificant ? 'significant' : 'routine'">
+            <span v-if="request.requestType === 'withdrawal'" class="badge withdrawal">Withdrawal</span>
+            <span v-else class="badge" :class="request.isSignificant ? 'significant' : 'routine'">
               {{ request.isSignificant ? "Significant" : "Routine" }}
             </span>
             <span class="thread-meta">Requested {{ formatDate(request.createdAt) }}</span>
           </div>
           <p class="change-reason"><strong>Reason:</strong> {{ request.reason }}</p>
-          <ul class="change-list">
+          <ul v-if="request.requestType !== 'withdrawal'" class="change-list">
             <li v-for="(change, key) in request.requestedChanges" :key="key">
               <strong>{{ CHANGE_LABELS[key] || key }}:</strong>
               {{ formatChangeValue(key, change.from) }} → {{ formatChangeValue(key, change.to) }}
@@ -404,6 +405,34 @@
           </div>
         </template>
       </div>
+
+      <div v-if="canRequestWithdrawal" class="action-block">
+        <template v-if="!showWithdrawalForm">
+          <h3 class="block-title">No longer need this event?</h3>
+          <p class="notice-inline">Ask the coordinator to withdraw it. Your event stays as it is until they decide.</p>
+          <div class="actions">
+            <button class="btn btn-grey" @click="openWithdrawalForm">Request Withdrawal</button>
+          </div>
+        </template>
+
+        <template v-else>
+          <h3 class="block-title">Request Withdrawal</h3>
+          <label class="field-row">
+            Reason for withdrawing
+            <textarea v-model="withdrawalReason" placeholder="Why do you want to withdraw this event?"></textarea>
+          </label>
+          <p v-if="withdrawalErrors.reason" class="field-error">{{ withdrawalErrors.reason }}</p>
+          <p v-if="withdrawalErrors.request" class="field-error">{{ withdrawalErrors.request }}</p>
+          <p v-if="withdrawalErrors.event" class="field-error">{{ withdrawalErrors.event }}</p>
+          <div class="actions">
+            <button class="btn btn-rose" :disabled="withdrawalSubmitting" @click="submitWithdrawalRequest">
+              Submit Withdrawal Request
+            </button>
+            <button class="btn btn-grey" :disabled="withdrawalSubmitting" @click="showWithdrawalForm = false">Cancel</button>
+          </div>
+        </template>
+      </div>
+
       <div v-if="event.status === 'rejected' && event.canResubmit" class="action-block">
         <h3 class="block-title">Revise and Resubmit</h3>
         <p class="notice-inline">Update the details below, then resubmit for review.</p>
@@ -582,6 +611,13 @@ const changeReason = ref("");
 const changeErrors = ref({}); // field -> message from the server
 const changeSubmitting = ref(false);
 
+// ---- Event withdrawal requests ----
+const canRequestWithdrawal = ref(false);
+const showWithdrawalForm = ref(false);
+const withdrawalReason = ref("");
+const withdrawalErrors = ref({});
+const withdrawalSubmitting = ref(false);
+
 const CHANGE_FIELDS = [
   { key: "proposed_date", label: "Date", type: "date", current: (e) => e.proposedDate },
   { key: "proposed_time", label: "Time", type: "time", current: (e) => e.proposedTime },
@@ -635,19 +671,23 @@ async function loadChangeRequests() {
     if (isOwningOrganiser.value) {
       const { data } = await changeRequestsApi.getForEvent(event.value.id);
       canRequestChange.value = data.canRequestChange;
+      canRequestWithdrawal.value = data.canRequestWithdrawal;
       currentVenueId.value = data.currentVenueId ?? null;
       changeRequests.value = data.requests || [];
     } else if (isAssignedCoordinator.value) {
       const { data } = await changeRequestsApi.listAssigned();
       changeRequests.value = data.filter((r) => r.eventId === event.value.id).sort((a, b) => b.id - a.id);
       canRequestChange.value = false;
+      canRequestWithdrawal.value = false;
     } else {
       changeRequests.value = [];
       canRequestChange.value = false;
+      canRequestWithdrawal.value = false;
     }
   } catch (e) {
     changeRequests.value = [];
     canRequestChange.value = false;
+    canRequestWithdrawal.value = false;
   }
   if (changeRequests.value.some((r) => r.requestedChanges?.venue_id)) await ensureCatalogue();
 }
@@ -704,6 +744,32 @@ async function submitChangeRequest() {
     changeErrors.value = data?.errors || { event: data?.error || "Could not submit the change request." };
   } finally {
     changeSubmitting.value = false;
+  }
+}
+
+function openWithdrawalForm() {
+  withdrawalReason.value = "";
+  withdrawalErrors.value = {};
+  showWithdrawalForm.value = true;
+}
+
+async function submitWithdrawalRequest() {
+  withdrawalErrors.value = {};
+  const confirmed = await confirm(
+    "Ask the coordinator to withdraw this event? Nothing changes until they decide."
+  );
+  if (!confirmed) return;
+
+  withdrawalSubmitting.value = true;
+  try {
+    await changeRequestsApi.requestWithdrawal(event.value.id, { reason: withdrawalReason.value });
+    showWithdrawalForm.value = false;
+    await load();
+  } catch (e) {
+    const data = e.response?.data;
+    withdrawalErrors.value = data?.errors || { event: data?.error || "Could not submit the withdrawal request." };
+  } finally {
+    withdrawalSubmitting.value = false;
   }
 }
 
