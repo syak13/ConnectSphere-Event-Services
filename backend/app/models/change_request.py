@@ -8,6 +8,7 @@ class ChangeRequest(db.Model):
     id = db.Column(db.BigInteger, primary_key=True)
     event_id = db.Column(db.BigInteger, db.ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
     organiser_id = db.Column(db.BigInteger, db.ForeignKey("users.id"), nullable=False)
+    request_type = db.Column(db.String(20), nullable=False, default="change")
     # {field: {"from": current value, "to": proposed value}}, only fields that differ
     requested_changes = db.Column(db.JSON, nullable=False)
     reason = db.Column(db.Text, nullable=False)
@@ -24,6 +25,7 @@ class ChangeRequest(db.Model):
             "id": self.id,
             "eventId": self.event_id,
             "organiserId": self.organiser_id,
+            "requestType": self.request_type,
             "status": self.status,
             "isSignificant": self.is_significant,
             "requestedChanges": self.requested_changes or {},
