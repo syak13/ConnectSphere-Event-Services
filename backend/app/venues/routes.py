@@ -434,26 +434,26 @@ def list_event_bookings(event_id):
     main auditorium plus breakout rooms) -- this lists all of them,
     independent of their individual statuses, so the UI can show the full
     multi-venue picture for one event."""
+    user = _current_user()
     event = Event.query.get(event_id)
     if not event:
         return jsonify({"error": "Event not found"}), 404
-    user = _current_user()
-    if user is None:
-        return jsonify({"error": "User not found"}), 404
 
-    if user.has_role("event_coordinator") and event.coordinator_id == user.id:
-        bookings = VenueBooking.query.filter_by(event_id=event_id)
-    elif user.has_role("venue_staff"):
-        bookings = (
-            VenueBooking.query.join(Venue, VenueBooking.venue_id == Venue.id)
-            .filter(VenueBooking.event_id == event_id, Venue.created_by == user.id)
-        )
-    else:
-        return jsonify({"error": "Forbidden"}), 403
+    is_owner = event.organiser_id == user.id
+    is_internal = any(
+        user.has_role(role)
+        for role in ("event_coordinator", "venue_staff", "technical_support_staff", "safety_officer")
+    )
+    if not (is_owner or is_internal):
+        return jsonify({"error": "Event not found"}), 404  # 404, not 403 — don't reveal existence
 
-    return jsonify([
-        b.to_dict() for b in bookings.order_by(VenueBooking.created_at.asc(), VenueBooking.id.asc()).all()
-    ]), 200
+    bookings_query = VenueBooking.query.filter_by(event_id=event_id)
+    if user.has_role("venue_staff"):
+        bookings_query = bookings_query.join(
+            Venue, VenueBooking.venue_id == Venue.id
+        ).filter(Venue.created_by == user.id)
+    bookings = bookings_query.order_by(VenueBooking.created_at.asc()).all()
+    return jsonify([b.to_dict() for b in bookings]), 200
 
 
 @venues_bp.post("/bookings/<int:booking_id>/withdraw")
@@ -548,14 +548,13 @@ def booking_confirmation_notices():
         "confirmedAt": b.decided_at.isoformat() if b.decided_at else None,
     } for b in approved]), 200
 
-
 @venues_bp.get("/bookings/rejection-notices")
 @roles_required("event_coordinator")
 def booking_rejection_notices():
-    """In-app rejection notices derived from saved booking decisions."""
     user = _current_user()
     rejected = (VenueBooking.query
-                .filter(VenueBooking.requested_by == user.id,
+                .join(Event, VenueBooking.event_id == Event.id)
+                .filter(Event.coordinator_id == user.id,
                         VenueBooking.status == "rejected")
                 .order_by(VenueBooking.decided_at.desc()).all())
     return jsonify([{

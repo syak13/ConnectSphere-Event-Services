@@ -16,6 +16,7 @@ from app.models.venue import (
     BOOKING_APPROVED,
     BOOKING_CANCELLED,
     BOOKING_WITHDRAWN,
+    BOOKING_REJECTED,
     VenueBooking,
 )
 
@@ -58,7 +59,7 @@ def confirm_after_safety_approval(event: Event, review: EventSafetyReview) -> Ev
     return _record_status_change(
         event,
         "confirmed",
-        review.safety_officer_id,
+        review.safety_officer.id,
         reason="Safety check approved",
     )
 
@@ -111,6 +112,7 @@ def arrangements_are_complete(event: Event) -> bool:
                 BOOKING_APPROVED,
                 BOOKING_WITHDRAWN,
                 BOOKING_CANCELLED,
+                BOOKING_REJECTED
             )
             for booking in venue_bookings
         ):
