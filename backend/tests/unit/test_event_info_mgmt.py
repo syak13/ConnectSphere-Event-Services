@@ -1,13 +1,21 @@
-# test event update service
 from datetime import datetime
 
 import pytest
 from app.extensions import db
+from app.models.event import EventEquipmentRequirement
 from app.models.event import Event
 from app.models.venue import Venue, VenueBooking, BOOKING_APPROVED, BOOKING_HELD
 from app.events.services.update import (
     update_event_fields, EventLockedError, EventNotEditableStatusError,
     OfflineReviewNotConfirmedError, EventValidationError,
+)
+from app.venues.services.preparation import (
+    update_venue_preparation,
+    PreparationUpdateError,
+)
+from app.equipment.services.preparation import (
+    update_equipment_preparation,
+    EquipmentPreparationError,
 )
 
 
@@ -271,10 +279,6 @@ class TestUpdateEventFields:
 
 
 # test venue preparation service
-import pytest
-from app.extensions import db
-from app.models.venue import Venue, VenueBooking, BOOKING_APPROVED
-from app.venues.services.preparation import update_venue_preparation, PreparationUpdateError
 
 
 def _make_preparation_booking(event_id, staff_id, status=BOOKING_APPROVED):
@@ -379,11 +383,6 @@ class TestVenuePreparation:
 
 
 # test equipment preparation service
-import pytest
-from app.extensions import db
-from app.models.event import EventEquipmentRequirement
-from app.equipment.services.preparation import update_equipment_preparation, EquipmentPreparationError
-
 
 def _make_requirement(event_id, status="requested"):
     req = EventEquipmentRequirement(event_id=event_id, equipment_type="Projector", quantity=2, status=status)
@@ -459,3 +458,4 @@ class TestEquipmentPreparation:
 
             with pytest.raises(EquipmentPreparationError):
                 update_equipment_preparation(req, tss, {"testing_status": "done"})
+
