@@ -557,33 +557,36 @@ class TestStory4Visibility:
         with client.application.app_context():
             assert db.session.get(Event, event_id).name == "Original Name"
 
-# # to fix:
-#     def test_resubmission_keeps_original_rejected_event_independently_searchable(
-#         self, client, auth_header, organiser, coordinator, make_event
-#     ):
-#         # AC5: after resubmitting a rejected request, the original is
-#         # still present and still "rejected" in the Organiser's list,
-#         # alongside the new resubmission as a separate row.
-#         original_id = make_event(
-#             organiser,
-#             status="rejected",
-#             name="Original Request",
-#             purpose="Purpose",
-#             description="Description",
-#             proposed_date=date(2026, 12, 1),
-#             expected_attendance=50,
-#             coordinator_id=coordinator,
-#         )
+    def test_resubmission_keeps_original_rejected_event_independently_searchable(
+        self, client, auth_header, organiser, coordinator, make_event
+    ):
+        # AC5: after resubmitting a rejected request, the original is
+        # still present and still "rejected" in the Organiser's list,
+        # alongside the new resubmission as a separate row.
+        original_id = make_event(
+        organiser,
+        status="rejected",
+        name="Original Request",
+        purpose="Purpose",
+        description="Description",
+        proposed_date=date(2026, 12, 1),
+        proposed_time=time(9, 0),
+        expected_attendance=50,
+        capacity_needed=100,
+        required_layout="theatre",
+        accessibility_needs="None",
+        coordinator_id=coordinator,
+        )
 
-#         res = client.post(
-#             f"/api/events/{original_id}/resubmit",
-#             headers=auth_header(ORG),
-#             json={},
-#         )
-#         assert res.status_code == 201, res.get_json()
-#         new_id = res.get_json()["id"]
+        res = client.post(
+            f"/api/events/{original_id}/resubmit",
+            headers=auth_header(ORG),
+            json={},
+        )
+        assert res.status_code == 201, res.get_json()
+        new_id = res.get_json()["id"]
 
-#         rows = {r["id"]: r["status"] for r in _mine(client, auth_header(ORG)).get_json()}
-#         assert rows[original_id] == "rejected"
-#         assert new_id in rows
-#         assert new_id != original_id
+        rows = {r["id"]: r["status"] for r in _mine(client, auth_header(ORG)).get_json()}
+        assert rows[original_id] == "rejected"
+        assert new_id in rows
+        assert new_id != original_id
