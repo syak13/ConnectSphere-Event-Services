@@ -66,10 +66,22 @@
           <p v-if="detail.decision.reason"><strong>Reason:</strong> {{ detail.decision.reason }}</p>
         </div>
         <div v-else class="actions">
-          <button v-for="action in detail.availableActions" :key="action" disabled title="Not available yet">
+          <button
+            v-for="action in detail.availableActions"
+            :key="action"
+            :disabled="action !== 'process_change' || processing"
+            :title="action === 'process_change' ? '' : 'Not available yet'"
+            @click="action === 'process_change' && processChange()"
+          >
             {{ ACTION_LABELS[action] }}
           </button>
         </div>
+        <p v-if="actionError" class="field-error">{{ actionError }}</p>
+        <ul v-if="Object.keys(actionErrors).length" class="field-error">
+          <li v-for="(message, field) in actionErrors" :key="field">
+            {{ field === "request" || field === "event" ? "" : labelFor(field) + ": " }}{{ message }}
+          </li>
+        </ul>
       </section>
     </div>
   </template>
@@ -78,6 +90,7 @@
   import { onMounted, ref } from "vue";
   import { useRoute } from "vue-router";
   import changeRequestsApi from "../api/changeRequests";
+  import { useConfirm } from "../composables/useConfirm";
   
   const route = useRoute();
   const queue = ref([]);
@@ -85,6 +98,10 @@
   const venues = ref([]);
   const loadError = ref("");
   const detailError = ref("");
+  const { confirm } = useConfirm();
+  const processing = ref(false);
+  const actionError = ref("");
+  const actionErrors = ref({});
   
   const FIELD_LABELS = {
     proposed_date: "Date",
@@ -164,6 +181,33 @@
     } catch (e) {
       detail.value = null;
       detailError.value = e.response?.data?.error || "Could not open this change request.";
+    }
+  }
+
+  async function processChange() {
+    actionError.value = "";
+    actionErrors.value = {};
+    const id = detail.value.request.id;
+    processing.value = true;
+    try {
+      try {
+        await changeRequestsApi.processChange(id); // not confirmed yet: the server answers 409 with its message
+      } catch (e) {
+        if (e.response?.status === 409 && e.response.data?.requiresConfirmation) {
+          if (!(await confirm(e.response.data.message))) return;
+          await changeRequestsApi.processChange(id, true);
+        } else {
+          throw e;
+        }
+      }
+      await loadQueue();
+      await openRequest(id); // shows the decision, who made it and when
+    } catch (e) {
+      const data = e.response?.data;
+      actionError.value = data?.errors ? "" : data?.error || "Could not process this change request.";
+      actionErrors.value = data?.errors || {};
+    } finally {
+      processing.value = false;
     }
   }
   
