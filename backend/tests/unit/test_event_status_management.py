@@ -571,52 +571,56 @@ def test_update_draft_rejects_edit_on_cancelled_event(app, organiser, make_event
         with pytest.raises(ValueError, match="Only a draft request"):
             drafts.update_draft(event, {"name": "Changed after cancellation"})
 
-# to fix:
-# def test_resubmission_leaves_original_rejected_event_unchanged(
-#     app, organiser, coordinator, make_event
-# ):
-
-
+def test_resubmission_leaves_original_rejected_event_unchanged(
+    app, organiser, coordinator, make_event
+):
     # AC5: resubmitting a rejected request creates a brand-new Event row;
     # the original must stay in the database, still "rejected", still
     # fetchable by its own id -- never mutated or deleted.
-    # with app.app_context():
-    #     original_id = make_event(
-    #         organiser,
-    #         status="rejected",
-    #         name="Original Request",
-    #         purpose="Purpose",
-    #         description="Description",
-    #         proposed_date=date(2026, 12, 1),
-    #         expected_attendance=50,
-    #         coordinator_id=coordinator,
-    #     )
-    #     original = db.session.get(Event, original_id)
+    with app.app_context():
+        original_id = make_event(
+            organiser,
+            status="rejected",
+            name="Original Request",
+            purpose="Purpose",
+            description="Description",
+            proposed_date=date(2026, 12, 1),
+            proposed_time=time(9, 0),
+            expected_attendance=50,
+            capacity_needed=100,
+            required_layout="theatre",
+            accessibility_needs="None",
+            coordinator_id=coordinator,
+        )
+        original = db.session.get(Event, original_id)
 
-    #     new_event = review.resubmit_rejected_event(original, organiser, {})
+        new_event = review.resubmit_rejected_event(original, organiser, {})
 
-    #     refreshed_original = db.session.get(Event, original_id)
-    #     assert refreshed_original.status == "rejected"
-    #     assert new_event.id != original_id
-    #     assert new_event.resubmitted_from_event_id == original_id
+        refreshed_original = db.session.get(Event, original_id)
+        assert refreshed_original.status == "rejected"
+        assert new_event.id != original_id
+        assert new_event.resubmitted_from_event_id == original_id
 
-# # to fix:
-# def test_cannot_be_resubmitted_a_second_time(app, organiser, coordinator, make_event):
-#     # AC5 guard: once a rejected request has one resubmission, the
-#     # original itself can't be resubmitted again (its own resubmission
-#     # can, forming a chain -- but that's review.py's job, not this check's).
-#     with app.app_context():
-#         original_id = make_event(
-#             organiser,
-#             status="rejected",
-#             name="Original Request",
-#             purpose="Purpose",
-#             description="Description",
-#             proposed_date=date(2026, 12, 1),
-#             expected_attendance=50,
-#             coordinator_id=coordinator,
-#         )
-#         original = db.session.get(Event, original_id)
-#         review.resubmit_rejected_event(original, organiser, {})
+def test_cannot_be_resubmitted_a_second_time(app, organiser, coordinator, make_event):
+    # AC5 guard: once a rejected request has one resubmission, the
+    # original itself can't be resubmitted again (its own resubmission
+    # can, forming a chain -- but that's review.py's job, not this check's).
+    with app.app_context():
+        original_id = make_event(
+            organiser,
+            status="rejected",
+            name="Original Request",
+            purpose="Purpose",
+            description="Description",
+            proposed_date=date(2026, 12, 1),
+            proposed_time=time(9, 0),
+            expected_attendance=50,
+            capacity_needed=100,
+            required_layout="theatre",
+            accessibility_needs="None",
+            coordinator_id=coordinator,
+        )
+        original = db.session.get(Event, original_id)
+        review.resubmit_rejected_event(original, organiser, {})
 
-#         assert review.can_be_resubmitted(db.session.get(Event, original_id)) is False
+        assert review.can_be_resubmitted(db.session.get(Event, original_id)) is False
