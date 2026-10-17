@@ -1,6 +1,5 @@
 from datetime import datetime
 
-import pytest
 from app.extensions import db
 from app.models.event import EventEquipmentRequirement
 from app.models.venue import Venue, VenueBooking, BOOKING_APPROVED
