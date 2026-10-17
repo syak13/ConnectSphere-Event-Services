@@ -4,7 +4,6 @@ from app.models.venue import (
     ACTIVE_BOOKING_STATUSES,
     BOOKING_APPROVED,
     Venue,
-    VenueAvailabilityFlag,
     VenueBooking,
 )
 SUITABILITY_FIELDS = {"capacity", "supported_layouts", "accessibility_features", "operating_hours"}

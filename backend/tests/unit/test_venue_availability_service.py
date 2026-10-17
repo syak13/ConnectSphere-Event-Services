@@ -6,7 +6,7 @@ change #2 (a venue becoming unavailable flags affected events instead of
 cancelling them). Time arithmetic is tested without a database; the rest calls
 the service functions directly against the in-memory test database.
 """
-from datetime import datetime, timedelta
+from datetime import datetime
 from types import SimpleNamespace
 import pytest
 from app.extensions import db

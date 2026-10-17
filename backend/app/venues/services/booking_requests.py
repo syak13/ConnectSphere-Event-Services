@@ -28,7 +28,7 @@ from app.common.time import utcnow
 from app.extensions import db
 from app.models.event import Event
 from app.models.venue import Venue, VenueBooking
-from app.venues.services.booking import ACTIVE_STATUSES, PENDING
+from app.venues.services.booking import PENDING
 
 ACTIVE_BOOKING_MESSAGE = "this event already has an active booking for this venue"
 REQUIRED_FIELDS = ("date", "start_time", "end_time")

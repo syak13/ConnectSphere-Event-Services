@@ -24,7 +24,7 @@ def create_app(config_name="development"):
 )
 
     # Import models so Flask-Migrate can detect them
-    from app.models import user, event, venue, equipment, change_request
+    from app.models import user, event, venue, equipment, change_request  # noqa: F401
 
     from app.auth.routes import auth_bp
     from app.equipment.routes import equipment_bp
@@ -48,5 +48,21 @@ def create_app(config_name="development"):
         from app.venues.services.booking import expire_due_holds
         count = expire_due_holds()
         print(f"Expired {count} tentative hold(s).")
+
+    @app.get("/api/health")
+    def health():
+        """Liveness check used by the CD pipeline's smoke test.
+
+        Also pings the database, so a release that starts but cannot reach
+        its database reports 503 instead of looking healthy.
+        """
+        from flask import jsonify
+        from sqlalchemy import text
+
+        try:
+            db.session.execute(text("SELECT 1"))
+        except Exception:
+            return jsonify(status="error", database="unreachable"), 503
+        return jsonify(status="ok", database="ok"), 200
 
     return app

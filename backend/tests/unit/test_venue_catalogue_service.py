@@ -6,7 +6,7 @@ layouts, and the validation rules from the acceptance criteria. Pure logic
 (validation, list syncing, suitability) is tested without a database; the rest
 calls the service functions directly against the in-memory test database.
 """
-from datetime import date, datetime
+from datetime import datetime
 from types import SimpleNamespace
 
 import pytest

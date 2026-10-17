@@ -23,7 +23,6 @@ from app.extensions import db  # noqa: E402
 from app.models.event import Event  # noqa: E402  (adjust if your Event model lives elsewhere)
 from app.models.user import Organisation, Role, User  # noqa: E402
 from app.models.venue import Venue, VenueBooking
-from app.common.time import utcnow
 
 app = create_app(os.getenv("FLASK_ENV", "development"))
 
