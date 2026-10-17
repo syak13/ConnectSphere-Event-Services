@@ -25,7 +25,7 @@ SIGNIFICANT_FIELDS = {
 EDITABLE_FIELDS = ORDINARY_FIELDS | SIGNIFICANT_FIELDS
 
 # US-1 AC1: Under Review, Approved, or Planning only -- not Safety Check
-# (a review may be in progress) and not Confirmed (that's the US-4 lock).
+# (a review may be in progress) and not Confirmed (this is the US-4 lock).
 EDITABLE_STATUSES = {"under_review", "approved", "planning"}
 
 
