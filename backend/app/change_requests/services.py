@@ -5,7 +5,8 @@ from app.common.text_validation import validate_descriptive_text
 from app.extensions import db
 from app.models.change_request import ChangeRequest
 from app.models.event import Event
-from app.models.venue import BOOKING_APPROVED, Venue, VenueBooking
+from app.models.venue import BOOKING_APPROVED, ACTIVE_BOOKING_STATUSES, Venue, VenueBooking
+from app.models.user import User
 
 CHANGEABLE_STATUSES = ("approved", "planning", "confirmed")
 STATUS_MESSAGE = "Changes can only be requested for an event that is approved, planning or confirmed"
@@ -297,3 +298,93 @@ def request_withdrawal(event: Event, organiser_id: int, reason: str) -> ChangeRe
     db.session.add(withdrawal)
     db.session.commit()
     return withdrawal
+
+# ---------------------------------------------------------------------
+# Coordinator review
+# ---------------------------------------------------------------------
+
+def _summary(change_request: ChangeRequest, event: Event) -> dict:
+    row = change_request.to_dict()
+    row["eventName"] = event.name
+    row["organiserName"] = event.organiser.name if event.organiser else None
+    return row
+
+
+def list_review_queue(coordinator_id: int):
+    """Pending requests on events this Coordinator is currently assigned to,
+    oldest first. Uses the event's current Coordinator, so reassignment is respected."""
+    pairs = (
+        db.session.query(ChangeRequest, Event)
+        .join(Event, ChangeRequest.event_id == Event.id)
+        .filter(Event.coordinator_id == coordinator_id, ChangeRequest.status == "pending")
+        .order_by(ChangeRequest.created_at.asc(), ChangeRequest.id.asc())
+        .all()
+    )
+    return [_summary(change_request, event) for change_request, event in pairs]
+
+
+def _affected_arrangements(event: Event) -> list:
+    bookings = (
+        VenueBooking.query.filter(
+            VenueBooking.event_id == event.id,
+            VenueBooking.status.in_(ACTIVE_BOOKING_STATUSES),
+        )
+        .order_by(VenueBooking.start_datetime.asc())
+        .all()
+    )
+    arrangements = [{"kind": "venue_booking", "venueId": b.venue_id, "status": b.status} for b in bookings]
+    arrangements += [
+        {"kind": "equipment", "type": e.equipment_type, "quantity": e.quantity, "status": e.status}
+        for e in event.equipment_requirements
+    ]
+    return arrangements
+
+
+def _available_actions(change_request: ChangeRequest) -> list:
+    if change_request.status != "pending":
+        return []
+    if change_request.request_type == "withdrawal":
+        return ["cancel_event", "cannot_accommodate"]
+    if change_request.is_significant:
+        return ["trigger_re_review", "cannot_accommodate"]
+    return ["process_change", "cannot_accommodate"]
+
+
+def _decision(change_request: ChangeRequest):
+    if change_request.status == "pending":
+        return None
+    decider = db.session.get(User, change_request.coordinator_id) if change_request.coordinator_id else None
+    return {
+        "status": change_request.status,
+        "decidedBy": decider.name if decider else None,
+        "decidedAt": change_request.decided_at.isoformat() if change_request.decided_at else None,
+        "reason": change_request.decision_reason,
+    }
+
+
+def get_review_detail(request_id: int, coordinator_id: int) -> dict:
+    """Everything the review screen needs. Read-only: nothing is written."""
+    change_request = db.session.get(ChangeRequest, request_id)
+    if change_request is None:
+        raise LookupError("Change request not found")
+    event = db.session.get(Event, change_request.event_id)
+    if event is None or event.coordinator_id != coordinator_id:
+        raise PermissionError("Only the Coordinator assigned to this event can review its change requests")
+
+    shows_arrangements = change_request.request_type == "change" and change_request.is_significant
+    return {
+        "request": change_request.to_dict(),
+        "event": {
+            "id": event.id,
+            "name": event.name,
+            "status": event.status,
+            "organiserName": event.organiser.name if event.organiser else None,
+        },
+        "changes": [
+            {"field": field, "current": values["from"], "proposed": values["to"]}
+            for field, values in (change_request.requested_changes or {}).items()
+        ],
+        "affectedArrangements": _affected_arrangements(event) if shows_arrangements else [],
+        "availableActions": _available_actions(change_request),
+        "decision": _decision(change_request),
+    }

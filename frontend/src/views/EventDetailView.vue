@@ -134,7 +134,7 @@
             <span v-else class="badge" :class="request.isSignificant ? 'significant' : 'routine'">
               {{ request.isSignificant ? "Significant" : "Routine" }}
             </span>
-            <span class="thread-meta">Requested {{ formatDate(request.createdAt) }}</span>
+            <span class="thread-meta">Requested {{ formatDate(request.createdAt) }} </span>
           </div>
           <p class="change-reason"><strong>Reason:</strong> {{ request.reason }}</p>
           <ul v-if="request.requestType !== 'withdrawal'" class="change-list">
@@ -146,6 +146,10 @@
           <p v-if="request.decisionReason" class="change-reason">
             <strong>Coordinator's reason:</strong> {{ request.decisionReason }}
           </p>
+          <router-link
+            v-if="isAssignedCoordinator"
+            :to="{ name: 'change-request-review', query: { id: request.id } }"
+          >Open in review</router-link>
         </li>
       </ul>
     </div>

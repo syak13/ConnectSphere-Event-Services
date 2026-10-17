@@ -11,6 +11,8 @@ from app.change_requests.services import (
     current_venue_id,
     can_request_withdrawal,
     request_withdrawal,
+    get_review_detail,
+    list_review_queue
 
 )
 from app.models.event import Event
@@ -86,6 +88,24 @@ def request_event_withdrawal(event_id):
 def assigned_to_me():
     user = _current_user()
     return jsonify([r.to_dict() for r in list_change_requests_for_coordinator(user.id)]), 200
+
+@change_requests_bp.get("/review")
+@roles_required("event_coordinator")
+def review_queue():
+    user = _current_user()
+    return jsonify(list_review_queue(user.id)), 200
+
+
+@change_requests_bp.get("/<int:request_id>/review")
+@roles_required("event_coordinator")
+def review_detail(request_id):
+    user = _current_user()
+    try:
+        return jsonify(get_review_detail(request_id, user.id)), 200
+    except LookupError:
+        return jsonify({"error": "Change request not found"}), 404
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
 
 @change_requests_bp.get("/catalogue")
 @roles_required("event_organiser", "event_coordinator")

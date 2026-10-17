@@ -6,4 +6,6 @@ export default {
   listAssigned: () => apiClient.get("/change-requests/assigned"),
   getCatalogue: () => apiClient.get("/change-requests/catalogue"),
   requestWithdrawal: (eventId, payload) => apiClient.post(`/change-requests/events/${eventId}/withdrawal`, payload),
+  getReviewQueue: () => apiClient.get("/change-requests/review"),
+  getReviewDetail: (requestId) => apiClient.get(`/change-requests/${requestId}/review`),
 };

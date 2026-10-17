@@ -18,6 +18,7 @@ import VenueSearchView from "../views/VenueSearchView.vue";
 import VenueCatalogueView from "../views/VenueCatalogueView.vue";
 import VenueAvailabilityView from "../views/VenueAvailabilityView.vue";
 import VenueBookingApprovalView from "../views/VenueBookingApprovalView.vue";
+import ChangeRequestReviewView from "../views/ChangeRequestReviewView.vue";
 
 
 const routes = [
@@ -139,7 +140,13 @@ const routes = [
     requiresAuth: true,
     roles: ["venue_staff"],
   },
-},
+  },
+  { path: "/change-requests", 
+    name: "change-request-review", 
+    component: ChangeRequestReviewView, 
+    meta: { 
+      requiresAuth: true }
+  },
 ];
 
 
