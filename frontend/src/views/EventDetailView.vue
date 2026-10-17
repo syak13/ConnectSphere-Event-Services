@@ -150,6 +150,7 @@
             v-if="isAssignedCoordinator"
             :to="{ name: 'change-request-review', query: { id: request.id } }"
           >Open in review</router-link>
+          <p v-if="request.decidedAt" class="change-reason"><strong>Processed:</strong> {{ formatDate(request.decidedAt) }}</p>
         </li>
       </ul>
     </div>
