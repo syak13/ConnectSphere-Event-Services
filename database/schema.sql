@@ -417,6 +417,7 @@ CREATE TABLE change_requests (
     status              ENUM('pending','processed','rejected','cannot_accommodate') NOT NULL DEFAULT 'pending',
     coordinator_id      BIGINT UNSIGNED NULL,
     decision_reason     TEXT NULL,
+    decided_at          DATETIME NULL,
     created_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     CONSTRAINT fk_cr_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,

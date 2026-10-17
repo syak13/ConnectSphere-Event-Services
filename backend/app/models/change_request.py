@@ -17,6 +17,7 @@ class ChangeRequest(db.Model):
     status = db.Column(db.String(30), nullable=False, default="pending")
     coordinator_id = db.Column(db.BigInteger, db.ForeignKey("users.id"), nullable=True)  # who decided it
     decision_reason = db.Column(db.Text, nullable=True)
+    decided_at = db.Column(db.DateTime, nullable=True)
     created_at = db.Column(db.DateTime, default=utcnow)
     updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
 
@@ -31,5 +32,6 @@ class ChangeRequest(db.Model):
             "requestedChanges": self.requested_changes or {},
             "reason": self.reason,
             "decisionReason": self.decision_reason,
+            "decidedAt": self.decided_at.isoformat() if self.decided_at else None,
             "createdAt": self.created_at.isoformat() if self.created_at else None,
         }
