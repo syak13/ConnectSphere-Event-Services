@@ -489,3 +489,31 @@ INSERT INTO roles (name) VALUES
     ('attendee');
 
 SET FOREIGN_KEY_CHECKS = 1;
+
+-- Event Information management: Add new columns for testing_status, installation_status, and needs_recheck to event_equipment_requirements table. Add new columns for setup_status, venue_notes, and needs_reconsideration to venue_bookings table. Create a new table event_field_edit_logs to log changes made to event fields.
+
+ALTER TABLE event_equipment_requirements
+    ADD COLUMN testing_status      ENUM('pending','in_progress','done') NOT NULL DEFAULT 'pending',
+    ADD COLUMN installation_status ENUM('pending','in_progress','done') NOT NULL DEFAULT 'pending',
+    ADD COLUMN needs_recheck       TINYINT(1) NOT NULL DEFAULT 0;
+
+ALTER TABLE venue_bookings
+    ADD COLUMN setup_status          ENUM('pending','in_progress','done') NOT NULL DEFAULT 'pending',
+    ADD COLUMN venue_notes           TEXT NULL,
+    ADD COLUMN needs_reconsideration TINYINT(1) NOT NULL DEFAULT 0;
+
+CREATE TABLE event_field_edit_logs (
+    id                BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id          BIGINT UNSIGNED NOT NULL,
+    changed_by        BIGINT UNSIGNED NULL,
+    fields_changed    JSON NOT NULL,
+    old_values        JSON NOT NULL,
+    new_values        JSON NOT NULL,
+    was_significant   TINYINT(1) NOT NULL DEFAULT 0,
+    was_rejected      TINYINT(1) NOT NULL DEFAULT 0,
+    rejection_reason  VARCHAR(500) NULL,
+    created_at        DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_efel_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+    CONSTRAINT fk_efel_user FOREIGN KEY (changed_by) REFERENCES users(id),
+    INDEX idx_efel_event (event_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

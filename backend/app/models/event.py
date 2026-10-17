@@ -51,7 +51,7 @@ class Event(db.Model):
     resubmitted_from_event_id = db.Column(db.BigInteger, db.ForeignKey("events.id"))
 
     created_at = db.Column(db.DateTime, default=utcnow())
-    updated_at = db.Column(db.DateTime, default=utcnow(), onupdate=utcnow())
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
     submitted_at = db.Column(db.DateTime)
 
     equipment_requirements = db.relationship(
@@ -78,6 +78,9 @@ class Event(db.Model):
 
     clarification_responses = db.relationship(
         "EventClarificationResponse", backref="event", cascade="all, delete-orphan"
+    )
+    field_edit_logs = db.relationship(
+        "EventFieldEditLog", backref="event", cascade="all, delete-orphan"
     )
 
 
@@ -117,6 +120,7 @@ class Event(db.Model):
                 "requiredFacilities": self.required_facilities or [],
             },
             "equipmentRequirements": [e.to_dict() for e in self.equipment_requirements],
+            "venueBookings": [booking.to_dict() for booking in self.venue_bookings],
             "registrationRequired": self.registration_required,
             "intendedCapacity": self.intended_capacity,
             "clarificationFlag": self.clarification_flag,
@@ -146,7 +150,10 @@ class EventEquipmentRequirement(db.Model):
     technical_notes = db.Column(db.Text)
     status = db.Column(db.String(20), default="requested")
     created_at = db.Column(db.DateTime, default=utcnow())
-    updated_at = db.Column(db.DateTime, default=utcnow(), onupdate=utcnow())
+    updated_at = db.Column(db.DateTime, default=utcnow, onupdate=utcnow)
+    testing_status = db.Column(db.String(20), nullable=False, default="pending")
+    installation_status = db.Column(db.String(20), nullable=False, default="pending")
+    needs_recheck = db.Column(db.Boolean, nullable=False, default=False)
 
     def to_dict(self):
         return {
@@ -155,6 +162,10 @@ class EventEquipmentRequirement(db.Model):
             "quantity": self.quantity,
             "technicalNotes": self.technical_notes,
             "status": self.status,
+            "testingStatus": self.testing_status,
+            "installationStatus": self.installation_status,
+            "needsRecheck": self.needs_recheck,
+            "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 
@@ -259,3 +270,17 @@ class EventCoordinatorHistory(db.Model):
     assigned_at = db.Column(db.DateTime, default=utcnow())
     unassigned_at = db.Column(db.DateTime)
     assignment_type = db.Column(db.String(20), default="auto")  # auto | reassignment
+class EventFieldEditLog(db.Model):
+    """Audit trail for ISP-118 US-1 edits and US-4 lock-rejection attempts."""
+    __tablename__ = "event_field_edit_logs"
+
+    id = db.Column(db.BigInteger, primary_key=True)
+    event_id = db.Column(db.BigInteger, db.ForeignKey("events.id", ondelete="CASCADE"), nullable=False)
+    changed_by = db.Column(db.BigInteger, db.ForeignKey("users.id"), nullable=True)
+    fields_changed = db.Column(db.JSON, nullable=False)
+    old_values = db.Column(db.JSON, nullable=False)
+    new_values = db.Column(db.JSON, nullable=False)
+    was_significant = db.Column(db.Boolean, nullable=False, default=False)
+    was_rejected = db.Column(db.Boolean, nullable=False, default=False)
+    rejection_reason = db.Column(db.String(500), nullable=True)
+    created_at = db.Column(db.DateTime, default=utcnow)
