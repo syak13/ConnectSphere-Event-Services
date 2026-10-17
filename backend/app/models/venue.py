@@ -205,6 +205,10 @@ class VenueBooking(db.Model):
         default="pending",
     )
 
+    setup_status = db.Column(db.String(20), nullable=False, default="pending")
+    venue_notes = db.Column(db.Text, nullable=True)
+    needs_reconsideration = db.Column(db.Boolean, nullable=False, default=False)
+
     start_datetime = db.Column(db.DateTime, nullable=False)
     end_datetime = db.Column(db.DateTime, nullable=False)
 
@@ -275,6 +279,10 @@ class VenueBooking(db.Model):
                 if self.decided_at
                 else None
             ),
+            "setupStatus": self.setup_status,
+            "venueNotes": self.venue_notes,
+            "needsReconsideration": self.needs_reconsideration,
+            "updatedAt": self.updated_at.isoformat() if self.updated_at else None,
         }
 
 class VenueAvailabilityFlag(db.Model):
