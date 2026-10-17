@@ -501,30 +501,30 @@ def get_my_booking_requests():
 
     results = []
 
-    for booking in bookings:
-        event = db.session.get(Event, booking.event_id)
-        venue = db.session.get(Venue, booking.venue_id)
+    for booking_row in bookings:
+        event = db.session.get(Event, booking_row.event_id)
+        venue = db.session.get(Venue, booking_row.venue_id)
 
         results.append({
-            "id": booking.id,
-            "eventId": booking.event_id,
+            "id": booking_row.id,
+            "eventId": booking_row.event_id,
             "eventName": event.name if event else None,
-            "venueId": booking.venue_id,
+            "venueId": booking_row.venue_id,
             "venueName": venue.name if venue else None,
-            "status": booking.to_dict()["status"],
-            "holdExpiresAt": booking.hold_expires_at.isoformat() if booking.hold_expires_at else None,
-            "startDatetime": booking.start_datetime.isoformat(),
-            "endDatetime": booking.end_datetime.isoformat(),
+            "status": booking_row.to_dict()["status"],
+            "holdExpiresAt": booking_row.hold_expires_at.isoformat() if booking_row.hold_expires_at else None,
+            "startDatetime": booking_row.start_datetime.isoformat(),
+            "endDatetime": booking_row.end_datetime.isoformat(),
             "createdAt": (
-                booking.created_at.isoformat()
-                if booking.created_at else None
+                booking_row.created_at.isoformat()
+                if booking_row.created_at else None
             ),
-            "decisionReason": booking.decision_reason,
-            "alternativeSuggestion": booking.alternative_suggestion,
-            "label": booking.booking_label,
-            "equipment": booking.equipment,
-            "catering": booking.catering,
-            "otherRequirements": booking.other_requirements,
+            "decisionReason": booking_row.decision_reason,
+            "alternativeSuggestion": booking_row.alternative_suggestion,
+            "label": booking_row.booking_label,
+            "equipment": booking_row.equipment,
+            "catering": booking_row.catering,
+            "otherRequirements": booking_row.other_requirements,
         })
 
     return jsonify(results), 200
@@ -589,11 +589,11 @@ def list_pending_bookings():
 
     results = []
 
-    for booking in pending:
-        data = booking.to_dict()
+    for booking_row in pending:
+        data = booking_row.to_dict()
 
-        event = booking.event
-        venue = booking.venue
+        event = booking_row.event
+        venue = booking_row.venue
 
         data.update({
             "eventName": event.name if event else None,

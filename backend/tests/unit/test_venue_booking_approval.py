@@ -661,7 +661,7 @@ def test_staff_history_only_shows_own_venues(client, scenario):
 
 # STORY 5: Venue Staff place a tentative hold that expires
 
-from app.venues.services.booking import expire_due_holds
+from app.venues.services.booking import expire_due_holds  # noqa: E402
 
 
 def hold_expiry(hours=48):

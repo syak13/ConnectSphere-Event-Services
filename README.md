@@ -99,12 +99,33 @@ pip install pytest
 pytest
 ```
 
-### Continuous integration
+### CI/CD pipeline
 
-`.github/workflows/tests.yml` runs the backend test suite on GitHub Actions
-for every push to `main` and every pull request into `main`. The job is named
-`test`; mark it as a required status check in the `main` branch protection
-rule so a pull request that breaks a test cannot be merged.
+`.github/workflows/pipeline.yml` runs on every pull request into `main` and
+every push to `main`:
+
+| Job | What it checks or does | Runs on |
+|---|---|---|
+| `lint` | Ruff (rules in `ruff.toml`) | every PR and push |
+| `test` | Backend unit and integration tests (pytest) | every PR and push |
+| `audit` | `pip-audit` on backend deps, `npm audit` on shipped frontend deps | every PR and push |
+| `package` | Builds `connectsphere-release.zip` once (backend + deps, built frontend, schema) and an SBOM | every PR and push |
+| `smoke` | Runs the zip against MySQL and probes it with `smoke.sh` | every PR and push |
+| `e2e` | Runs the zip and tests the login journey in a real browser (`e2e/`) | every PR and push |
+| `staging` | Records the release's SHA-256 (placeholder, no deployment) | push to `main` |
+| `production` | Waits for approval, then confirms it got the same zip (placeholder) | push to `main` |
+
+Mark `test`, `smoke` and `e2e` (optionally `lint` and `audit`) as required
+status checks on `main`. Add yourself as a required reviewer on the
+`production` environment to make the release gate a human decision.
+
+Run the smoke and browser tests locally against a running app:
+
+```bash
+bash smoke.sh http://localhost:5000                   # needs curl and jq; seeded DB
+pip install playwright && python -m playwright install chromium
+BASE_URL=http://localhost:5173/ python -m unittest discover -s e2e -v
+```
 
 ## 3. Frontend setup (Vue)
 
