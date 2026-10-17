@@ -4,7 +4,6 @@ from flask_jwt_extended import get_jwt_identity, jwt_required
 from app.auth.decorators import roles_required
 from app.events.services import assignment, drafts, review, safety
 from app.events.services import status as status_service
-from app.events.services import assignment, drafts, review, safety
 from app.events.services import update as update_service
 
 from app.models.event import Event
