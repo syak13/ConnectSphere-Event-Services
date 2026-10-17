@@ -8,4 +8,6 @@ export default {
   requestWithdrawal: (eventId, payload) => apiClient.post(`/change-requests/events/${eventId}/withdrawal`, payload),
   getReviewQueue: () => apiClient.get("/change-requests/review"),
   getReviewDetail: (requestId) => apiClient.get(`/change-requests/${requestId}/review`),
+  processChange: (requestId, confirmed = false) =>
+    apiClient.post(`/change-requests/${requestId}/process`, { confirmed }),
 };

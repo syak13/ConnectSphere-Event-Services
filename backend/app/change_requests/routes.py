@@ -12,7 +12,8 @@ from app.change_requests.services import (
     can_request_withdrawal,
     request_withdrawal,
     get_review_detail,
-    list_review_queue
+    list_review_queue,
+    process_routine_change,
 
 )
 from app.models.event import Event
@@ -106,6 +107,28 @@ def review_detail(request_id):
         return jsonify({"error": "Change request not found"}), 404
     except PermissionError as e:
         return jsonify({"error": str(e)}), 403
+
+@change_requests_bp.post("/<int:request_id>/process")
+@roles_required("event_coordinator")
+def process_change(request_id):
+    user = _current_user()
+    data = request.get_json() or {}
+    try:
+        # Refusals come first, so nobody is asked to confirm something that would fail.
+        process_routine_change(request_id, user.id, dry_run=True)
+        if data.get("confirmed") is not True:
+            return jsonify({
+                "requiresConfirmation": True,
+                "message": "Apply these changes to the event? Its status, venue bookings and equipment stay as they are.",
+            }), 409
+        processed = process_routine_change(request_id, user.id)
+    except LookupError:
+        return jsonify({"error": "Change request not found"}), 404
+    except PermissionError as e:
+        return jsonify({"error": str(e)}), 403
+    except ChangeRequestError as e:
+        return jsonify({"error": "This change request could not be processed", "errors": e.errors}), 400
+    return jsonify(processed.to_dict()), 200
 
 @change_requests_bp.get("/catalogue")
 @roles_required("event_organiser", "event_coordinator")

@@ -426,6 +426,21 @@ CREATE TABLE change_requests (
     INDEX idx_cr_event (event_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
+CREATE TABLE event_change_history (
+    id                  BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    event_id            BIGINT UNSIGNED NOT NULL,
+    change_request_id   BIGINT UNSIGNED NOT NULL,
+    field               VARCHAR(100) NOT NULL,
+    old_value           JSON NULL,
+    new_value           JSON NULL,
+    changed_by          BIGINT UNSIGNED NOT NULL,
+    changed_at          DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_chg_hist_event FOREIGN KEY (event_id) REFERENCES events(id) ON DELETE CASCADE,
+    CONSTRAINT fk_chg_hist_request FOREIGN KEY (change_request_id) REFERENCES change_requests(id) ON DELETE CASCADE,
+    CONSTRAINT fk_chg_hist_user FOREIGN KEY (changed_by) REFERENCES users(id),
+    INDEX idx_chg_hist_event (event_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
 -- ---------------------------------------------------------------------
 -- Notification System
 -- ---------------------------------------------------------------------

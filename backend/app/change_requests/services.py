@@ -1,9 +1,10 @@
 """Event Change Requests: an Organiser requests a change to an event."""
 from datetime import date, time
 
+from app.common.time import utcnow
 from app.common.text_validation import validate_descriptive_text
 from app.extensions import db
-from app.models.change_request import ChangeRequest
+from app.models.change_request import ChangeRequest, EventChangeHistory
 from app.models.event import Event
 from app.models.venue import BOOKING_APPROVED, ACTIVE_BOOKING_STATUSES, Venue, VenueBooking
 from app.models.user import User
@@ -388,3 +389,83 @@ def get_review_detail(request_id: int, coordinator_id: int) -> dict:
         "availableActions": _available_actions(change_request),
         "decision": _decision(change_request),
     }
+
+# ---------------------------------------------------------------------
+# Coordinator processes a routine change
+# ---------------------------------------------------------------------
+
+# For these, a stored None means "clear the value" and is allowed.
+CLEARABLE_FIELDS = {"category", "accessibility_needs"}
+PROCESS_STATUS_MESSAGE = "A change can only be processed while the event is approved, planning or confirmed"
+
+
+def _revalidate(requested: dict):
+    """Run every stored proposed value through the same checks as submission.
+    Returns ({field: cleaned value}, {field: error message})."""
+    cleaned, errors = {}, {}
+    for field, values in requested.items():
+        proposed = values.get("to") if isinstance(values, dict) else None
+        if field not in CLEANERS:
+            errors[field] = f"{field} cannot be changed through a change request"
+        elif proposed is None and field in CLEARABLE_FIELDS:
+            cleaned[field] = None
+        else:
+            try:
+                cleaned[field] = CLEANERS[field](proposed)
+            except ValueError as problem:
+                errors[field] = str(problem)
+    return cleaned, errors
+
+
+def process_routine_change(request_id: int, coordinator_id: int, dry_run: bool = False) -> ChangeRequest:
+    """Apply a pending routine change to the event, all or nothing.
+    dry_run runs every check and writes nothing."""
+    # Locking read: of two simultaneous attempts, the second waits and then sees "processed".
+    change_request = db.session.query(ChangeRequest).filter_by(id=request_id).with_for_update().first()
+    if change_request is None:
+        raise LookupError("Change request not found")
+    event = db.session.get(Event, change_request.event_id)
+    if event is None or event.coordinator_id != coordinator_id:
+        raise PermissionError("Only the Coordinator assigned to this event can process its change requests")
+
+    requested = change_request.requested_changes or {}
+    if change_request.status != "pending":
+        raise ChangeRequestError({"request": "This change request has already been decided"})
+    if change_request.request_type == "withdrawal":
+        raise ChangeRequestError(
+            {"request": "A withdrawal request is handled by cancelling the event, not by processing a change"}
+        )
+    if change_request.is_significant or any(field in SIGNIFICANT_FIELDS for field in requested):
+        raise ChangeRequestError(
+            {"request": "A significant change needs re-review and cannot be processed directly"}
+        )
+    if event.status not in CHANGEABLE_STATUSES:
+        raise ChangeRequestError({"event": PROCESS_STATUS_MESSAGE})
+
+    cleaned, errors = _revalidate(requested)
+    if errors:
+        raise ChangeRequestError(errors)  # nothing has been written
+    if dry_run:
+        return change_request
+
+    for field, proposed in cleaned.items():
+        current = _current_value(event, field)  # the live value being replaced
+        if _same(field, current, proposed):
+            continue
+        db.session.add(
+            EventChangeHistory(
+                event_id=event.id,
+                change_request_id=change_request.id,
+                field=field,
+                old_value=current,
+                new_value=proposed,
+                changed_by=coordinator_id,
+            )
+        )
+        setattr(event, field, proposed)
+
+    change_request.status = "processed"
+    change_request.coordinator_id = coordinator_id
+    change_request.decided_at = utcnow()
+    db.session.commit()
+    return change_request
